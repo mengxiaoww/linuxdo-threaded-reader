@@ -5,7 +5,7 @@ const source = readFileSync('linuxdo-comments.user.js', 'utf8');
 const dom = new JSDOM('', { url: 'https://linux.do/', runScripts: 'outside-only', pretendToBeVisual: true });
 const w = dom.window;
 w.GM_getValue = (_, v) => v; w.GM_setValue = w.GM_registerMenuCommand = w.GM_addStyle = () => {};
-w.eval(source.replace(/\}\)\(\);\s*$/, 'window.progressTest = { threadProgress, threadSections };})();'));
+w.eval(source.replace(/\}\)\(\);\s*$/, 'window.progressTest = { threadProgress, threadSections, renderProgress };})();'));
 const { threadProgress } = w.progressTest;
 const node = (top, bottom) => ({ getBoundingClientRect: () => ({ top, bottom, height: bottom - top }) });
 // 四条顶层回复，第一串有很多长回复。按页面高度读到一半时，不能误报已读一半回复。
@@ -18,6 +18,7 @@ const rect = { top: 0, bottom: 1000, height: 1000 };
 assert.equal(threadProgress(s, rect, 0), 0, '首帖不计入顶层回复');
 assert.ok(Math.abs(threadProgress(s, rect, .4) - .125) < 1e-8, '第一串读一半为 1/8，子回复不增加分母');
 assert.equal(threadProgress(s, rect, .7), .25, '到第二条顶层回复为 25%');
+assert.equal(threadProgress(s, rect, .6995), .25, '滚动取整相差半像素时仍定位到目标回复');
 assert.equal(threadProgress(s, rect, .8), .5, '到第三条顶层回复为 50%');
 assert.equal(threadProgress(s, rect, 1), 1, '完整末尾为 100%');
 const small = { ...s, nodes: new Map([...s.nodes].filter(([n]) => n !== 5)), raw: new Map([...s.raw].filter(([n]) => n !== 5)) };
@@ -34,4 +35,7 @@ assert.equal(threadProgress(deep, rect, 0), .5, '深链接窗口的上沿保持�
 assert.equal(threadProgress({...deep,allowStart:true}, rect, 0),0,'明确点顶部日期才回到开头零进度');
 s.rootIds.set(60,4);
 assert.equal(threadProgress(s, rect, 1), .8, '新增顶层回复会增加总数，新增楼内回复不会');
+const precise={reader:{},rootIds:new Map(Array.from({length:23},(_,i)=>[i,i])),raw:new Map(),progress:w.document.createElement('div')};
+precise.progress.innerHTML='<span class="ldt-progress-caption"></span><button class="ldt-progress-rail"></button><span class="ldt-progress-percent"></span><span class="ldt-progress-total"></span>';
+for(let i=0;i<23;i++){w.progressTest.renderProgress(precise,i/23);assert.equal(precise.progress.querySelector('.ldt-progress-percent').textContent,`${i+1} / 23`,'浮点边界不显示成上一条');}
 w.close(); console.log('PASS: 顶层回复等权进度、嵌套回复、首帖排除、短帖、未加载部分、深链接、总数未知、末尾 100%');

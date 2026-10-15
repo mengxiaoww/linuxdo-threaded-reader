@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Linux DO 楼中楼阅读
 // @namespace    local.linuxdo.threaded-reading
-// @version      6.0.15
+// @version      6.0.16
 // @description  长帖按需加载、楼中楼递进连线、未读提示与引用切换，保留论坛原生操作。
 // @match        https://linux.do/*
 // @run-at       document-start
@@ -51,6 +51,10 @@
     .ldt-native-post[data-ldt-depth]:not([data-ldt-depth="0"]) > .ldt-native-content > .topic-post > .boxed > .row { grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
     .ldt-native-post > .ldt-native-content > .topic-post > .boxed > .row:has(> .post-notice) { display: block; width: 100%; }
     .ldt-owned .post-notice { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
+    .ldt-owned .post-notice.new-user { display: flex; align-items: flex-start; gap: 8px; width: fit-content; margin: 0 0 12px; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--tertiary, #5965c7) 12%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--tertiary, #5965c7) 5%, var(--secondary, #fff)); color: var(--primary-high, #555); font-size: 12px; line-height: 1.6; }
+    .ldt-owned .post-notice.new-user > :first-child { flex: 0 0 auto; margin-top: 2px; }
+    .ldt-owned .post-notice.new-user .emoji { width: 16px; height: 16px; }
+    .ldt-owned .post-notice.new-user p { min-width: 0; margin: 0; overflow-wrap: anywhere; }
     .ldt-owned .topic-body { float: none; width: 100% !important; min-width: 0; max-width: 100%; box-sizing: border-box; margin: 0 !important; }
     .ldt-owned .topic-avatar { float: none; min-width: 0; margin: 0 !important; align-self: start; padding: 12px 0 0 !important; }
     .ldt-owned .topic-meta-data { display: flex; align-items: flex-start; width: 100%; min-width: 0; gap: 8px; margin: 0 !important; box-sizing: border-box; }
@@ -657,7 +661,7 @@
     if (!groups.total) return position;
     // 每串讨论占一个进度单位，楼内回复只延长这一串的阅读区间。
     const point = rect.height * position;
-    const group = groups.sections.findLast(p => p.start <= point);
+    const group = groups.sections.findLast(p => p.start <= point + 1);
     if (!group) return s.allowStart ? 0 : (groups.sections[0]?.index || 0) / groups.total;
     const fraction = Math.max(0, Math.min(1, (point - group.start) / Math.max(1, group.end - group.start)));
     return Math.max(0, Math.min(1, (group.index + fraction) / groups.total));
@@ -679,7 +683,7 @@
 
   function renderProgress(s, progress, atEnd = false) {
     const total = progressTotal(s);
-    const index = progress === null || total === undefined ? null : total ? Math.min(total, Math.floor(progress * total) + 1) : 0;
+    const index = progress === null || total === undefined ? null : total ? Math.min(total, Math.floor(progress * total + 1e-7) + 1) : 0;
     const text = index === null ? '统计中' : `${index} / ${total}`;
     const ratio = s.dragRatio ?? (index === null || total <= 1 ? progress || 0 : (index - 1) / (total - 1));
     const mobile = document.querySelector('#topic-progress');
@@ -738,7 +742,7 @@
     } catch {
       if (s === state && s.locating === token) { s.locateError = true; updateProgress(s); }
     } finally {
-      if (s.locating === token) s.locating = null;
+      if (s.locating === token) { s.locating = null; if (s === state) scheduleProgress(); }
     }
   }
 
@@ -756,7 +760,8 @@
     };
     rail.addEventListener('pointerdown', event => {
       if (event.button !== 0 || rail.disabled) return;
-      event.preventDefault(); rail.focus(); rail.setPointerCapture(event.pointerId); preview(event);
+      event.preventDefault(); clearTimeout(s.nextTimer); s.nextTimer = null; s.locating = null; s.locateError = false;
+      rail.focus(); rail.setPointerCapture(event.pointerId); preview(event);
     });
     rail.addEventListener('pointermove', event => { if (rail.hasPointerCapture(event.pointerId)) preview(event); });
     rail.addEventListener('pointerup', event => {
@@ -843,13 +848,22 @@
   }
 
   async function readerFooter(s) {
-    const model = s.renderer.controller.model, stream = model?.postStream;
-    if (s !== state || Number(model?.id) !== s.id || !stream || stream.loadedAllPosts || typeof stream.refresh !== 'function' || s.footerLoading || Date.now() < (s.footerRetryAt || 0)) return;
+    const controller = s.renderer.controller, model = controller.model, stream = model?.postStream;
+    if (s !== state || Number(model?.id) !== s.id || !stream || typeof stream.updateFromJson !== 'function' || s.footerLoading || Date.now() < (s.footerRetryAt || 0) || s.footerHighest === s.highest && stream.loadedAllPosts) return;
     s.footerLoading = true;
     try {
-      // 让原生帖流正常取得末尾状态，恢复论坛自身的底部工具、通知设置和推荐内容。
-      await stream.refresh({ nearPost: s.highest, refreshInPlace: true });
-      if (!stream.loadedAllPosts) s.footerRetryAt = Date.now() + 30000;
+      // 提前补齐原生帖流的真实末页，让原生页尾在读到末尾之前准备好。
+      if (!stream.loadedAllPosts) {
+        const data = await readerFetch(s, `/t/${s.id}/${s.highest}.json`), tail = data.post_stream;
+        if (!tail?.posts?.some(p => p.id === tail.stream?.at(-1))) throw new Error('末页暂不可读取');
+        s.renderer.run(() => stream.updateFromJson(tail));
+      }
+      if (s !== state) return;
+      s.renderer.run(() => {
+        stream.notifyPropertyChange?.('loadedAllPosts');
+        controller.notifyPropertyChange?.('loadedAllPosts');
+      });
+      s.footerHighest = s.highest;
     } catch { s.footerRetryAt = Date.now() + 30000; }
     finally { s.footerLoading = false; if (s === state) scheduleProgress(); }
   }
@@ -898,7 +912,7 @@
     const upward = s.lastScrollY !== undefined && window.scrollY < s.lastScrollY - 2;
     s.lastScrollY = window.scrollY;
     const first = s.nodes.get(s.headNumber)?.getBoundingClientRect();
-    if (upward && !s.host.hidden && s.headCursor > 0 && !s.loadingPrevious && first?.top > header - 240 && first.top < bottom + 240) readerPrevious(s);
+    if (s.dragRatio === undefined && !s.locating && upward && !s.host.hidden && s.headCursor > 0 && !s.loadingPrevious && first?.top > header - 240 && first.top < bottom + 240) readerPrevious(s);
     const complete = s.tailOnly || s.cursor >= s.ids.length && !s.rootRemaining?.size;
     const atEnd = complete && rect.bottom <= bottom + 24;
     const position = Math.max(0, Math.min(1, (header + 12 - rect.top) / Math.max(1, rect.height)));
@@ -907,11 +921,11 @@
     const edge = s.more.getBoundingClientRect();
     const nearEnd = edge.height > 0 && edge.top < window.innerHeight + 240 && edge.bottom > headerBottom();
     if (!document.hidden && nearEnd) readerFooter(s);
-    if (!document.hidden && nearEnd && !s.more.disabled && !s.nextError && !s.initError && !s.loadingNext && !s.nextTimer) {
+    if (s.dragRatio === undefined && !s.locating && !document.hidden && nearEnd && !s.more.disabled && !s.nextError && !s.initError && !s.loadingNext && !s.nextTimer) {
       s.nextTimer = setTimeout(() => {
         s.nextTimer = null;
         const current = s.more.getBoundingClientRect();
-        if (s === state && !document.hidden && current.top < window.innerHeight + 240 && current.bottom > headerBottom()) readerNext(s);
+        if (s === state && s.dragRatio === undefined && !s.locating && !document.hidden && current.top < window.innerHeight + 240 && current.bottom > headerBottom()) readerNext(s);
       }, 500);
     }
     updateConnectors();
@@ -934,11 +948,25 @@
   }
 
   async function readerFetch(s, path) {
-    const response = await fetch(path, { credentials: 'same-origin', signal: s.abort.signal, headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
-    if (!response.ok) throw new Error('加载失败，请重试');
-    const data = await response.json();
-    if (s !== state) throw new Error('已离开话题');
-    return data;
+    for (let attempt = 0; ; attempt++) {
+      let response;
+      try {
+        if (s !== state || s.abort.signal.aborted) throw new Error('已离开话题');
+        response = await fetch(path, { credentials: 'same-origin', signal: s.abort.signal, headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
+        if (!response.ok) throw new Error('加载失败，请重试');
+        const data = await response.json();
+        if (s !== state || s.abort.signal.aborted) throw new Error('已离开话题');
+        return data;
+      } catch (error) {
+        if (s !== state || s.abort.signal.aborted || error.name === 'AbortError' || attempt >= 2 || response && !response.ok && response.status < 500) throw error;
+      }
+      // 短暂断连或服务繁忙时留在加载状态；切换话题后立即取消等待。
+      await new Promise((resolve, reject) => {
+        const cancel = () => { clearTimeout(timer); reject(new Error('已离开话题')); };
+        const timer = setTimeout(() => { s.abort.signal.removeEventListener('abort', cancel); resolve(); }, (attempt + 1) * 500);
+        s.abort.signal.addEventListener('abort', cancel, { once: true });
+      });
+    }
   }
 
   function nativeRenderer() {
@@ -1248,6 +1276,7 @@
         } else if (s.tailOnly) readerEnd(s);
         else if (target > 1 && s.nodes.has(target)) readerJump(s, target);
         updateProgress(s);
+        readerFooter(s);
       } catch (error) { if (s === state) { s.host.hidden = false; s.status.textContent = '评论加载失败，可切换引用模式使用原页面'; s.more.textContent = '重新加载'; s.more.disabled = false; s.initError = true; s.native.classList.remove('ldt-native-hidden'); s.reader.hidden = true; s.more.setAttribute('data-ldt-retry', ''); s.more.setAttribute('role', 'button'); s.more.tabIndex = 0; } }
     })();
   }

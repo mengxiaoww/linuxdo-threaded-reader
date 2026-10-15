@@ -29,8 +29,17 @@ w.fetch=async path=>{calls.push(path);return{ok:true,json:async()=>{
  throw Error(path);
 }}};
 const native=d.querySelector('.post-stream'),navigations=[];w.navigate=path=>navigations.push(path);
-w.eval(source.replaceAll('location.assign(', 'window.navigate(').replace(/\}\)\(\);\s*$/, 'window.navigationTest={locateRoot,getState:()=>state};})();'));
+let footerCalls=0,finishFooter;const footerReady=new Promise(resolve=>finishFooter=resolve);
+topic.postStream.loadedAllPosts=false;
+const nativeFooter=d.createElement('section');nativeFooter.id='topic-footer-buttons';nativeFooter.innerHTML='<button>分享</button><button>添加为书签</button><button>举报</button><button>标记为未读</button><button>回复</button><div id="suggested-topics">推荐</div>';
+nativeFooter.querySelector('button').onclick=()=>actions.push(['native-share']);
+topic.postStream.updateFromJson=tail=>{assert.equal(tail.posts.at(-1).id,11000);topic.postStream.loadedAllPosts=true;native.after(nativeFooter)};
+const beforeFooterFetch=w.fetch;w.fetch=async path=>{if(path!=='/t/42/1000.json')return beforeFooterFetch(path);footerCalls++;await footerReady;return{ok:true,json:async()=>({post_stream:{stream:ids,posts:[post(1000)]}})}};
+let footerNotified=0;controller.notifyPropertyChange=name=>{assert.equal(name,'loadedAllPosts');footerNotified++};
+
+w.eval(source.replaceAll('location.assign(', 'window.navigate(').replace(/\}\)\(\);\s*$/, 'window.navigationTest={locateRoot,readerFetch,getState:()=>state};})();'));
 await until(()=>d.querySelector('.ldt-owned > [data-post-number="219"]'),'阅读区初始化');
+assert.equal(footerCalls,1,'阅读区准备完成即预备原生页尾，不等用户到底');
 await until(()=>d.querySelector('.ldt-progress-total')?.title,'顶层回复总数确定');
 const s=w.navigationTest.getState(),rail=d.querySelector('.ldt-progress-rail'),rootIds=[...s.rootIds.keys()];
 assert.equal(rail.getAttribute('role'),'slider');assert.equal(Number(rail.getAttribute('aria-valuemax')),997,'排除首帖和两条嵌套回复');
@@ -54,18 +63,31 @@ w.fetch=async path=>path.endsWith(`post_ids[]=${slowId}`)?{ok:true,json:async()=
 const old=w.navigationTest.locateRoot(s,700.5/rootIds.length);
 await w.navigationTest.locateRoot(s,(cachedIndex+.5)/rootIds.length);release();await old;
 assert.equal(navigations.length,1,'较慢的旧定位请求不能覆盖后一次选择');
+let finishOld;const oldGate=new Promise(resolve=>finishOld=resolve);
+w.fetch=async path=>({ok:true,json:async()=>{await oldGate;return{post_stream:{posts:[post(slowId-10000)]}}}});
+const outstanding=w.navigationTest.locateRoot(s,700.5/rootIds.length);
+pointer('pointerdown',150);finishOld();await outstanding;
+assert.equal(navigations.length,1,'开始新的拖动即作废旧请求，不能在松手之前被旧目标带走');
+pointer('pointerup',110+(cachedIndex+.5)/rootIds.length*180);
+
 let idleMutations=0;await pause(30);const idleObserver=new w.MutationObserver(records=>idleMutations+=records.length);idleObserver.observe(s.progress,{childList:true,subtree:true});await pause(100);idleObserver.disconnect();assert.equal(idleMutations,0,'静止时不反复重建文字，避免闪烁和持续重排');
 // 只使用原站的末尾加载流程恢复底部功能，不伪造 loadedAllPosts。
-let footerCalls=0;topic.postStream.loadedAllPosts=false;
-const nativeFooter=d.createElement('section');nativeFooter.id='topic-footer-buttons';nativeFooter.innerHTML='<button>分享</button><button>添加为书签</button><button>举报</button><button>标记为未读</button><button>回复</button><div id="suggested-topics">推荐</div>';
-nativeFooter.querySelector('button').onclick=()=>actions.push(['native-share']);
-topic.postStream.refresh=async opts=>{footerCalls++;assert.equal(opts.nearPost,1000);assert.equal(opts.refreshInPlace,true);assert.equal(opts.forceLoad,undefined,'不清空原生帖流，避免重新挂载和跳动');topic.postStream.loadedAllPosts=true;native.after(nativeFooter)};
+finishFooter();
 s.more.getBoundingClientRect=()=>({top:600,bottom:640,height:40});w.dispatchEvent(new w.Event('scroll'));
 await until(()=>d.querySelector('#topic-footer-buttons'),'接近阅读区底部恢复原生操作和推荐');
-assert.equal(footerCalls,1);nativeFooter.querySelector('button').click();assert.equal(actions.at(-1)[0],'native-share');
+assert.equal(footerCalls,1);assert.equal(footerNotified,1,'原生加载完成后通知页尾重新计算');nativeFooter.querySelector('button').click();assert.equal(actions.at(-1)[0],'native-share');
 assert.equal(s.nodes.get(200),cached,'恢复页尾不重建正在看的评论');
 w.dispatchEvent(new w.Event('scroll'));await pause(25);assert.equal(footerCalls,1,'原生页尾已就绪时不重复请求');
+let attempts=0;
+w.fetch=async()=>{attempts++;if(attempts===1)throw new TypeError('网络暂时断开');if(attempts===2)return{ok:false,status:503};return{ok:true,json:async()=>({ok:true})}};
+assert.equal((await w.navigationTest.readerFetch(s,'/fixture/recovery')).ok,true);assert.equal(attempts,3,'临时网络失败和服务繁忙自动恢复');
+attempts=0;w.fetch=async()=>{attempts++;return{ok:false,status:404}};
+await assert.rejects(w.navigationTest.readerFetch(s,'/fixture/missing'));assert.equal(attempts,1,'不存在的内容不重复请求');
+attempts=0;w.fetch=async()=>{attempts++;throw new TypeError('网络暂时断开')};
+const cancelled=w.navigationTest.readerFetch(s,'/fixture/cancel');const rejected=assert.rejects(cancelled);
+await pause(30);
 d.querySelector('[data-mode="quote"]').click();await pause(25);
+await rejected;assert.equal(attempts,1,'切换引用后取消等待中的重试，不覆盖新页面');
 assert.equal(d.querySelector('#topic-footer-buttons'),nativeFooter,'切回引用模式保留同一个原生页尾');
 assert.equal(d.querySelector('.ldt-reading-progress'),null,'引用模式恢复原始定位条');
 w.close();console.log('PASS: 顶层回复拖动预览/松手单条定位/缓存直达/旧请求隔离、原生页尾恢复与引用模式保留');
