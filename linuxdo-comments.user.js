@@ -1,7 +1,9 @@
 // ==UserScript==
 // @name         Linux DO 楼中楼阅读
 // @namespace    local.linuxdo.threaded-reading
-// @version      6.1.2
+// @version      6.1.3
+// @downloadURL  https://github.com/mengxiaoww/linuxdo-threaded-reader/raw/refs/heads/main/linuxdo-comments.user.js
+// @updateURL    https://github.com/mengxiaoww/linuxdo-threaded-reader/raw/refs/heads/main/linuxdo-comments.user.js
 // @description  长帖按需加载、楼中楼递进连线、未读提示与引用切换，保留论坛原生操作。
 // @match        https://linux.do/*
 // @run-at       document-start

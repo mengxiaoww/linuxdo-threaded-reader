@@ -2,13 +2,15 @@
 
 把 LINUX DO 的回复按讨论关系串起来看，也可以切回按楼层顺序阅读的引用模式。
 
-**当前版本：v6.1.2** · [论坛分享与反馈](https://linux.do/t/topic/3021097) · [更新记录](CHANGELOG.md)
+**当前版本：v6.1.3** · [论坛分享与反馈](https://linux.do/t/topic/3021097) · [更新记录](CHANGELOG.md)
 
 ## 安装 / 更新
 
-1. 浏览器安装篡改猴（Tampermonkey）等用户脚本管理器，并允许访问 `linux.do`。
+1. 浏览器安装暴力猴（Violentmonkey）、篡改猴（Tampermonkey）等用户脚本管理器，并允许访问 `linux.do`。
 2. [打开完整脚本](https://raw.githubusercontent.com/mengxiaoww/linuxdo-threaded-reader/main/linuxdo-comments.user.js)。管理器若出现安装页，按提示安装；否则复制全部代码，在管理器中新建脚本并完整替换。
 3. 保存后刷新已经打开的话题。更新旧版时替换原脚本，避免同时启用两份。
+
+**暴力猴自动更新**：先安装一次 v6.1.3 或更新版本，再在暴力猴设置中启用自动检查更新，并确认该脚本允许更新。脚本已内置 `@updateURL` 和 `@downloadURL`，以后仓库发布更高的 `@version` 时，管理器会按设置的周期检查并更新；也可手动检查更新。更新后刷新话题生效。仅将新版上传到 GitHub，不会给尚未配置更新地址的旧脚本补上设置。
 
 仓库中的脚本保留原始排版，没有压缩。下载文件位于 [linuxdo-comments.user.js](linuxdo-comments.user.js)。
 
