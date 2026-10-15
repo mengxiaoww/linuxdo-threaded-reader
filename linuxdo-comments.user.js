@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Linux DO 楼中楼阅读
 // @namespace    local.linuxdo.threaded-reading
-// @version      6.0.18
+// @version      6.0.19
 // @description  长帖按需加载、楼中楼递进连线、未读提示与引用切换，保留论坛原生操作。
 // @match        https://linux.do/*
 // @run-at       document-start
@@ -18,6 +18,10 @@
   GM_addStyle(`
 
     .ldt-native-hidden { display: none !important; }
+    [data-ldt-footer="pending"] { display: none !important; }
+    [data-ldt-footer="shown"] { animation: ldt-footer-in 180ms ease-out; }
+    @keyframes ldt-footer-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    @media (prefers-reduced-motion: reduce) { [data-ldt-footer="shown"] { animation: none; } }
     .ldt-reader-window { min-width: 0; overflow-anchor: none; padding: 0 10px; }
     .ldt-independent { min-width: 0; position: relative; overflow-anchor: none; }
     .ldt-reader-toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--primary-low, #e2e4e7); }
@@ -807,6 +811,7 @@
     if (state.reader) { state.autoReplies?.disconnect(); clearTimeout(state.autoTimer); clearTimeout(state.readTimer); clearTimeout(state.nextTimer); clearInterval(state.checkTimer); for (const view of state.views.values()) { try { state.renderer.run(() => view.destroy()); } catch {} } state.host.remove(); state.native.classList.remove("ldt-native-hidden"); }
     state.notice?.remove();
     clearProgress(state);
+    document.querySelectorAll('[data-ldt-footer]').forEach(node => delete node.dataset.ldtFooter);
     state.stream.querySelector(":scope > .ldt-connectors")?.remove();
     state.bar.remove();
     state.style.remove();
@@ -871,6 +876,15 @@
     finally { s.footerLoading = false; if (s === state) scheduleProgress(); }
   }
 
+  function readerFooterVisibility(s) {
+    const settled = !s.host.hidden && !s.loadingNext && !s.countingRoots && (s.tailOnly || s.cursor >= s.ids.length && !s.rootRemaining?.size || s.nextError);
+    if (settled || s.initError) s.footerRevealed = true;
+    const value = s.footerRevealed ? 'shown' : 'pending';
+    for (const node of document.querySelectorAll('.topic-map.--bottom, #topic-footer-buttons, .more-topics__container')) {
+      if (node.dataset.ldtFooter !== value) node.dataset.ldtFooter = value;
+    }
+  }
+
   function updateReader(s) {
     if (s !== state) return;
     const boundary = readerStartBoundary(s);
@@ -921,6 +935,7 @@
     const position = Math.max(0, Math.min(1, (header + 12 - rect.top) / Math.max(1, rect.height)));
     renderProgress(s, s.dragRatio ?? (atEnd ? 1 : threadProgress(s, rect, position)), atEnd);
     readerMoreState(s);
+    readerFooterVisibility(s);
     const edge = s.more.getBoundingClientRect();
     const nearEnd = edge.height > 0 && edge.top < window.innerHeight + 240 && edge.bottom > headerBottom();
     if (!document.hidden && nearEnd) readerFooter(s);
@@ -1163,6 +1178,7 @@
   }
 
   async function readerRootCount(s) {
+    s.countingRoots = (s.countingRoots || 0) + 1;
     try {
       const data = await readerFetch(s, `/t/${s.id}.json?filter_top_level_replies=true`);
       if ((data.post_stream?.posts || []).some(p => Number(p.reply_to_post_number) > 0)) return;
@@ -1176,6 +1192,7 @@
       const missing = (data.post_stream.posts || []).filter(p => s.rootRemaining.has(p.id));
       if (!s.tailOnly && s.rootIds.size <= 20 && missing.length) await readerAdd(s, missing, true);
     } catch { /* 统计失败时不展示推算的总数，也不影响阅读。 */ }
+    finally { s.countingRoots--; }
   }
 
   function rootCountLabel(s) {
@@ -1280,7 +1297,7 @@
         else if (target > 1 && s.nodes.has(target)) readerJump(s, target);
         updateProgress(s);
         readerFooter(s);
-      } catch (error) { if (s === state) { s.host.hidden = false; s.status.textContent = '评论加载失败，可切换引用模式使用原页面'; s.more.textContent = '重新加载'; s.more.disabled = false; s.initError = true; s.native.classList.remove('ldt-native-hidden'); s.reader.hidden = true; s.more.setAttribute('data-ldt-retry', ''); s.more.setAttribute('role', 'button'); s.more.tabIndex = 0; } }
+      } catch (error) { if (s === state) { s.host.hidden = false; s.status.textContent = '评论加载失败，可切换引用模式使用原页面'; s.more.textContent = '重新加载'; s.more.disabled = false; s.initError = true; s.native.classList.remove('ldt-native-hidden'); s.reader.hidden = true; s.more.setAttribute('data-ldt-retry', ''); s.more.setAttribute('role', 'button'); s.more.tabIndex = 0; readerFooterVisibility(s); } }
     })();
   }
 
