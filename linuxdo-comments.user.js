@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Linux DO 楼中楼阅读
 // @namespace    local.linuxdo.threaded-reading
-// @version      6.0.14
+// @version      6.0.15
 // @description  长帖按需加载、楼中楼递进连线、未读提示与引用切换，保留论坛原生操作。
 // @match        https://linux.do/*
 // @run-at       document-start
@@ -49,6 +49,8 @@
     .ldt-native-post > .ldt-native-content > .topic-post > .boxed > .row { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 12px; align-items: start; }
     .ldt-native-post > .ldt-native-content > .topic-post > .boxed > .row::before, .ldt-native-post > .ldt-native-content > .topic-post > .boxed > .row::after { content: none; }
     .ldt-native-post[data-ldt-depth]:not([data-ldt-depth="0"]) > .ldt-native-content > .topic-post > .boxed > .row { grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
+    .ldt-native-post > .ldt-native-content > .topic-post > .boxed > .row:has(> .post-notice) { display: block; width: 100%; }
+    .ldt-owned .post-notice { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
     .ldt-owned .topic-body { float: none; width: 100% !important; min-width: 0; max-width: 100%; box-sizing: border-box; margin: 0 !important; }
     .ldt-owned .topic-avatar { float: none; min-width: 0; margin: 0 !important; align-self: start; padding: 12px 0 0 !important; }
     .ldt-owned .topic-meta-data { display: flex; align-items: flex-start; width: 100%; min-width: 0; gap: 8px; margin: 0 !important; box-sizing: border-box; }
@@ -236,14 +238,13 @@
     .ldt-progress-rail::before { content: ""; position: absolute; left: 8px; top: 10px; bottom: 10px; width: 2px; background: var(--primary-low, #ddd); }
     .ldt-progress-fill { position: absolute; left: 8px; top: 10px; width: 2px; height: calc((100% - 20px) * var(--ldt-progress, 0)); background: var(--tertiary, #3979a3); }
     .ldt-progress-handle { position: absolute; left: 6px; top: calc((100% - 20px) * var(--ldt-progress, 0)); width: 6px; height: 20px; border-radius: 4px; background: var(--tertiary, #3979a3); }
-    .ldt-reading-progress [role="progressbar"] { cursor: default; }
     .ldt-progress-percent { position: absolute; left: 23px; top: calc((100% - 20px) * var(--ldt-progress, 0)); font-size: 16px; font-weight: 600; line-height: 20px; color: var(--primary, #333); }
     #topic-progress[data-ldt-mobile-progress] { display: flex; align-items: center; justify-content: center; box-sizing: border-box; height: auto; min-height: 40px; padding: 4px 10px; border: 1px solid var(--primary-low, #ddd); border-radius: 6px; background: var(--secondary, #fff); }
     #topic-progress[data-ldt-mobile-progress] > .nums,
     #topic-progress[data-ldt-mobile-progress] > .bg { display: none !important; }
-    .ldt-progress-navigation { display: block; margin-bottom: 6px; color: var(--primary-medium, #777); font-size: 12px; }
     .ldt-progress-mobile { display: block; color: var(--primary, #333); font-size: 12px; font-weight: 600; line-height: 1.5; white-space: nowrap; }
-    .ldt-progress-rail:focus-visible { outline: 2px solid var(--tertiary, #3979a3); outline-offset: 3px; border-radius: 4px; }
+    .ldt-progress-rail:focus-visible { outline: none; }
+    .ldt-progress-rail:focus-visible .ldt-progress-handle { outline: 2px solid var(--tertiary, #3979a3); outline-offset: 3px; }
     .ldt-auto-quote blockquote { white-space: pre-wrap; overflow-wrap: anywhere; }
     @media (max-width: 640px) {
       .ldt-reader-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; }
@@ -492,7 +493,7 @@
       }
       for (const badge of view.querySelectorAll('.ld-inline-post > .ld-post-header .ld-post-topic-owner-badge')) {
         if (!badge.hasAttribute('data-ldt-owner-text')) badge.dataset.ldtOwnerText = badge.textContent;
-        if (badge.textContent !== '楼主') badge.textContent = '楼主';
+        if (badge.textContent !== 'OP') badge.textContent = 'OP';
       }
       for (const card of view.querySelectorAll('.ld-inline-post:not(.ld-parent-preview *)')) {
         const parent = card.parentElement.closest('.ld-post-card, .ld-inline-post');
@@ -630,8 +631,6 @@
     s.progress = null;
     s.mobileProgress?.remove();
     s.mobileProgress = null;
-    s.navigationNote?.remove();
-    s.navigationNote = null;
     document.querySelectorAll('[data-ldt-native-progress], [data-ldt-mobile-progress]').forEach(n => { delete n.dataset.ldtNativeProgress; delete n.dataset.ldtMobileProgress; });
   }
 
@@ -669,104 +668,129 @@
     node.title = label;
     node.toggleAttribute('data-ldt-end-count', atEnd);
     const numbers = label.match(/^已加载 (\d+) \/ 共 (\d+) 条顶层回复$/);
-    const text = atEnd ? ['已到末尾', numbers ? `共 ${numbers[2]} 条` : ''] : numbers ? ['顶层回复', `${numbers[1]} / ${numbers[2]}`] : [];
+    const text = numbers ? ['已加载', `${numbers[1]} 条`] : [];
     node.replaceChildren(...text.filter(Boolean).map(value => element('span', '', value)));
     node.setAttribute('aria-label', atEnd ? `已到末尾，${label}` : label);
   }
 
-  function updateProgress(s) {
-    if (s.reader) {
-      const native = document.querySelector(".timeline-container:not(.timeline-fullscreen) .timeline-scrollarea");
-      if (native && !s.progress) {
-        s.progress = element("div", "ldt-reading-progress");
-        s.progress.innerHTML = `<span class="ldt-progress-caption">阅读进度</span><div class="ldt-progress-rail" role="progressbar" aria-label="阅读进度" aria-valuemin="0" aria-valuemax="100"><span class="ldt-progress-fill"></span><span class="ldt-progress-handle"></span><span class="ldt-progress-percent"></span></div><span class="ldt-progress-total"></span>`;
-      }
-      if (native) { native.dataset.ldtNativeProgress = ""; if (native.nextElementSibling !== s.progress) native.after(s.progress); }
-      updateReader(s); return;
-    }
-    updateUnread(s);
-    if (mode !== 'thread') { clearProgress(s); return; }
-    const candidate = document.querySelector('.timeline-scrollarea');
-    const fullscreen = candidate?.closest('.timeline-fullscreen');
-    const native = fullscreen ? null : candidate;
-    if (fullscreen) {
-      delete candidate.dataset.ldtNativeProgress;
-      if (!s.navigationNote) s.navigationNote = element('span', 'ldt-progress-navigation', '原楼号导航 · 含回复');
-      if (candidate.previousElementSibling !== s.navigationNote) candidate.before(s.navigationNote);
-    } else s.navigationNote?.remove();
+  function progressTotal(s) {
+    return s.reader ? s.rootIds?.size : s.total && s.posts.size >= s.total ? [...s.posts.values()].filter(p => p.number > 1 && !p.parent).length : undefined;
+  }
+
+  function renderProgress(s, progress, atEnd = false) {
+    const total = progressTotal(s);
+    const index = progress === null || total === undefined ? null : total ? Math.min(total, Math.floor(progress * total) + 1) : 0;
+    const text = index === null ? '统计中' : `${index} / ${total}`;
+    const ratio = s.dragRatio ?? (index === null || total <= 1 ? progress || 0 : (index - 1) / (total - 1));
     const mobile = document.querySelector('#topic-progress');
-    if (!native) s.progress?.remove();
-    if (!mobile) s.mobileProgress?.remove();
-    if (!native && !mobile) return;
-    if (native && !s.progress) {
-      const panel = element('div', 'ldt-reading-progress');
-      const rail = element('button', 'ldt-progress-rail');
-      rail.type = 'button';
-      rail.setAttribute('role', 'slider');
-      rail.setAttribute('aria-label', '阅读位置');
-      rail.setAttribute('aria-orientation', 'vertical');
-      rail.setAttribute('aria-valuemin', '0');
-      rail.setAttribute('aria-valuemax', '100');
-      rail.append(element('span', 'ldt-progress-fill'), element('span', 'ldt-progress-handle'), element('span', 'ldt-progress-percent'));
-      const jump = ratio => {
-        ratio = Math.max(0, Math.min(1, ratio));
-        const rect = s.stream.getBoundingClientRect(), groups = threadSections(s, rect);
-        const group = groups?.sections.find(p => p.index === Math.floor(ratio * groups.total));
-        if (group && rect.height && ratio > 0 && ratio < 1) ratio = (group.start + (group.end - group.start) * (ratio * groups.total - group.index)) / rect.height;
-        window.scrollTo({ top: s.progressStart + ratio * s.progressRange, behavior: 'auto' });
-      };
-      const move = event => {
-        const r = rail.getBoundingClientRect();
-        if (r.height) jump((event.clientY - r.top - 10) / Math.max(1, r.height - 20));
-      };
-      rail.addEventListener('pointerdown', event => {
-        if (event.button !== 0) return;
-        event.preventDefault();
-        rail.focus();
-        rail.setPointerCapture(event.pointerId);
-        move(event);
-      });
-      rail.addEventListener('pointermove', event => { if (rail.hasPointerCapture(event.pointerId)) move(event); });
-      rail.addEventListener('keydown', event => {
-        const value = Number(rail.getAttribute('aria-valuenow')) / 100;
-        const target = { ArrowUp: value - .03, ArrowDown: value + .03, PageUp: value - .15, PageDown: value + .15, Home: 0, End: 1 }[event.key];
-        if (target !== undefined) { event.preventDefault(); jump(target); }
-      });
-      panel.append(element('span', 'ldt-progress-caption'), rail, element('span', 'ldt-progress-total'));
-      s.progress = panel;
-    }
-    if (native) {
-      native.dataset.ldtNativeProgress = '';
-      if (native.nextElementSibling !== s.progress) native.after(s.progress);
-      s.progress.style.height = native.style.height || '300px';
-    }
-    const rect = s.stream.getBoundingClientRect();
-    const header = headerBottom();
-    s.progressStart = Math.max(0, rect.top + window.scrollY - header);
-    s.progressRange = Math.max(0, rect.height - Math.max(1, window.innerHeight - header));
-    const position = s.progressRange ? Math.max(0, Math.min(1, (window.scrollY - s.progressStart) / s.progressRange)) : (rect.bottom <= window.innerHeight ? 1 : 0);
-    const progress = threadProgress(s, rect, position), ratio = progress ?? 0;
-    const count = rootCountLabel(s);
-    const percent = Math.round(ratio * 100), percentText = progress === null ? '统计中' : `${percent}%`;
-    if (native) {
-      for (const [selector, text] of [['.ldt-progress-caption', '阅读进度'], ['.ldt-progress-total', rootCountLabel(s)], ['.ldt-progress-percent', percentText]]) {
-        const node = s.progress.querySelector(selector);
-        if (selector === '.ldt-progress-total') progressCount(node, text);
-        else if (node.textContent !== text) node.textContent = text;
-      }
-      const rail = s.progress.querySelector('.ldt-progress-rail');
-      rail.style.setProperty('--ldt-progress', ratio);
-      if (progress === null) rail.removeAttribute('aria-valuenow'); else rail.setAttribute('aria-valuenow', percent);
-      rail.setAttribute('aria-valuetext', progress === null ? '正在统计回复' : `阅读进度 ${percent}%，${count}`);
-    }
     if (mobile) {
       if (!s.mobileProgress) s.mobileProgress = element('span', 'ldt-progress-mobile');
       mobile.dataset.ldtMobileProgress = '';
       if (s.mobileProgress.parentElement !== mobile) mobile.append(s.mobileProgress);
-      const text = `阅读 ${percentText}`;
-      if (s.mobileProgress.textContent !== text) s.mobileProgress.textContent = text;
-      s.mobileProgress.title = `阅读进度，${count}`;
+      if (s.mobileProgress.textContent !== `回复 ${text}`) s.mobileProgress.textContent = `回复 ${text}`;
     }
+    if (!s.progress) return;
+    const rail = s.progress.querySelector('.ldt-progress-rail');
+    rail.style.setProperty('--ldt-progress', ratio);
+    rail.disabled = index === null || !total;
+    rail.setAttribute('aria-valuemax', Math.max(1, total || 0));
+    if (index === null) rail.removeAttribute('aria-valuenow'); else rail.setAttribute('aria-valuenow', index);
+    rail.setAttribute('aria-valuetext', index === null ? '正在统计顶层回复' : `第 ${index} 条顶层回复，共 ${total} 条`);
+    const label = s.progress.querySelector('.ldt-progress-percent');
+    if (label.textContent !== text) label.textContent = text;
+    const caption = s.progress.querySelector('.ldt-progress-caption');
+    if (caption.textContent !== '顶层回复') caption.textContent = '顶层回复';
+    progressCount(s.progress.querySelector('.ldt-progress-total'), rootCountLabel(s), atEnd);
+  }
+
+  async function locateRoot(s, ratio) {
+    const total = progressTotal(s);
+    if (s !== state || !total) return;
+    const index = Math.min(total - 1, Math.floor(Math.max(0, Math.min(1, ratio)) * total));
+    const token = s.locating = {};
+    s.locateError = false;
+    try {
+      if (!s.reader) {
+        const roots = [...s.posts.values()].filter(p => p.number > 1 && !p.parent).sort((a, b) => a.number - b.number);
+        jumpToPost(s, roots[index].number);
+      } else {
+        const id = [...s.rootIds.keys()][index];
+        let post = [...s.raw.values()].find(p => p.id === id);
+        if (post && s.nodes.has(post.post_number)) {
+          s.tailOnly = false;
+          if (!index) s.allowStart = true;
+          readerJump(s, post.post_number);
+        } else {
+          // 只查目标顶层回复的楼号，交给原站加载目标附近的一页，不扫描中间历史。
+          if (!post) {
+            const data = await readerFetch(s, `/t/${s.id}/posts.json?post_ids[]=${id}`);
+            post = data.post_stream?.posts?.find(p => p.id === id && Number.isSafeInteger(p.post_number));
+          }
+          if (s !== state || s.locating !== token) return;
+          if (!post || post.topic_id && post.topic_id !== s.id) throw new Error('定位失败');
+          location.assign(`/t/topic/${s.id}/${post.post_number}`);
+          return;
+        }
+      }
+      if (document.querySelector('.timeline-fullscreen')) {
+        try { (s.renderer || nativeRenderer()).owner.lookup('service:modal')?.close(); } catch {}
+      }
+    } catch {
+      if (s === state && s.locating === token) { s.locateError = true; updateProgress(s); }
+    } finally {
+      if (s.locating === token) s.locating = null;
+    }
+  }
+
+  function progressPanel(s) {
+    const panel = element('div', 'ldt-reading-progress');
+    const rail = element('button', 'ldt-progress-rail');
+    rail.type = 'button';
+    rail.setAttribute('role', 'slider'); rail.setAttribute('aria-label', '按顶层回复定位');
+    rail.setAttribute('aria-orientation', 'vertical'); rail.setAttribute('aria-valuemin', '1');
+    rail.append(element('span', 'ldt-progress-fill'), element('span', 'ldt-progress-handle'), element('span', 'ldt-progress-percent'));
+    const preview = event => {
+      const box = rail.getBoundingClientRect();
+      s.dragRatio = Math.max(0, Math.min(1, (event.clientY - box.top - 10) / Math.max(1, box.height - 20)));
+      renderProgress(s, s.dragRatio);
+    };
+    rail.addEventListener('pointerdown', event => {
+      if (event.button !== 0 || rail.disabled) return;
+      event.preventDefault(); rail.focus(); rail.setPointerCapture(event.pointerId); preview(event);
+    });
+    rail.addEventListener('pointermove', event => { if (rail.hasPointerCapture(event.pointerId)) preview(event); });
+    rail.addEventListener('pointerup', event => {
+      if (!rail.hasPointerCapture(event.pointerId)) return;
+      preview(event);
+      const ratio = s.dragRatio; s.dragRatio = undefined;
+      rail.releasePointerCapture(event.pointerId); locateRoot(s, ratio);
+    });
+    rail.addEventListener('pointercancel', () => { s.dragRatio = undefined; updateProgress(s); });
+    rail.addEventListener('keydown', event => {
+      const total = progressTotal(s), index = Number(rail.getAttribute('aria-valuenow')) - 1;
+      const target = { ArrowUp: index - 1, ArrowDown: index + 1, PageUp: index - 10, PageDown: index + 10, Home: 0, End: (total || 1) - 1 }[event.key];
+      if (total && target !== undefined) { event.preventDefault(); locateRoot(s, (Math.max(0, Math.min(total - 1, target)) + .5) / total); }
+    });
+    panel.append(element('span', 'ldt-progress-caption'), rail, element('span', 'ldt-progress-total'));
+    return panel;
+  }
+
+  function updateProgress(s) {
+    if (!s.reader) updateUnread(s);
+    if (mode !== 'thread') { clearProgress(s); return; }
+    const native = document.querySelector('.timeline-fullscreen .timeline-scrollarea') || document.querySelector('.timeline-container .timeline-scrollarea');
+    if (native) {
+      if (!s.progress) s.progress = progressPanel(s);
+      native.dataset.ldtNativeProgress = '';
+      if (native.nextElementSibling !== s.progress) native.after(s.progress);
+      s.progress.style.height = native.style.height || '300px';
+    }
+    if (s.reader) { updateReader(s); return; }
+    const rect = s.stream.getBoundingClientRect();
+    const position = Math.max(0, Math.min(1, (headerBottom() + 12 - rect.top) / Math.max(1, rect.height)));
+    const atEnd = rect.bottom <= window.innerHeight;
+    const progress = s.dragRatio ?? (atEnd ? 1 : threadProgress(s, rect, position));
+    renderProgress(s, progress, atEnd);
   }
 
   function scheduleProgress() {
@@ -818,6 +842,18 @@
     return tops.length ? Math.max(0, window.scrollY + Math.min(...tops) - headerBottom() - 12) : null;
   }
 
+  async function readerFooter(s) {
+    const model = s.renderer.controller.model, stream = model?.postStream;
+    if (s !== state || Number(model?.id) !== s.id || !stream || stream.loadedAllPosts || typeof stream.refresh !== 'function' || s.footerLoading || Date.now() < (s.footerRetryAt || 0)) return;
+    s.footerLoading = true;
+    try {
+      // 让原生帖流正常取得末尾状态，恢复论坛自身的底部工具、通知设置和推荐内容。
+      await stream.refresh({ nearPost: s.highest, refreshInPlace: true });
+      if (!stream.loadedAllPosts) s.footerRetryAt = Date.now() + 30000;
+    } catch { s.footerRetryAt = Date.now() + 30000; }
+    finally { s.footerLoading = false; if (s === state) scheduleProgress(); }
+  }
+
   function updateReader(s) {
     if (s !== state) return;
     const boundary = readerStartBoundary(s);
@@ -853,7 +889,7 @@
     const count = s.pending.size;
     s.unreadButton.hidden = !count;
     s.unreadButton.textContent = `↑ ${count} 条新回复`;
-    const status = s.initError ? '评论加载失败，可切换引用模式使用原页面' : s.loadingPrevious ? '正在加载前面的回复…' : s.previousError ? '前面的回复暂时加载失败，上滑重试' : '评论';
+    const status = s.initError ? '评论加载失败，可切换引用模式使用原页面' : s.locateError ? '定位失败，请重试' : s.loadingPrevious ? '正在加载前面的回复…' : s.previousError ? '前面的回复暂时加载失败，上滑重试' : '评论';
     if (s.status.textContent !== status) s.status.textContent = status;
     const rect = s.reader.getBoundingClientRect();
     const header = headerBottom();
@@ -863,33 +899,14 @@
     s.lastScrollY = window.scrollY;
     const first = s.nodes.get(s.headNumber)?.getBoundingClientRect();
     if (upward && !s.host.hidden && s.headCursor > 0 && !s.loadingPrevious && first?.top > header - 240 && first.top < bottom + 240) readerPrevious(s);
-    const range = Math.max(0, rect.height - Math.max(1, bottom - header));
-    const position = range ? Math.max(0, Math.min(1, (header - rect.top) / range)) : 1;
-    const atEnd = s.tailOnly && position >= .999;
-    const progress = atEnd ? 1 : threadProgress(s, rect, position), ratio = progress ?? 0;
-    const percent = Math.round(ratio * 100), percentText = progress === null ? '统计中' : `${percent}%`;
-    const mobile = document.querySelector("#topic-progress");
-    if (mobile) {
-      if (!s.mobileProgress) s.mobileProgress = element("span", "ldt-progress-mobile");
-      mobile.dataset.ldtMobileProgress = "";
-      if (s.mobileProgress.parentElement !== mobile) mobile.append(s.mobileProgress);
-      const text = `阅读 ${percentText}`;
-      if (s.mobileProgress.textContent !== text) s.mobileProgress.textContent = text;
-    }
-    if (s.progress) {
-      const rail = s.progress.querySelector('.ldt-progress-rail');
-      rail.style.setProperty('--ldt-progress', ratio);
-      if (progress === null) rail.removeAttribute('aria-valuenow'); else rail.setAttribute('aria-valuenow', percent);
-      rail.setAttribute('aria-valuetext', progress === null ? '正在统计回复' : `阅读进度 ${percent}%，${rootCountLabel(s)}`);
-      for (const [selector, text] of [['.ldt-progress-percent', percentText], ['.ldt-progress-caption', '阅读进度'], ['.ldt-progress-total', rootCountLabel(s)]]) {
-        const label = s.progress.querySelector(selector);
-        if (selector === '.ldt-progress-total') progressCount(label, text, !!atEnd);
-        else if (label.textContent !== text) label.textContent = text;
-      }
-    }
+    const complete = s.tailOnly || s.cursor >= s.ids.length && !s.rootRemaining?.size;
+    const atEnd = complete && rect.bottom <= bottom + 24;
+    const position = Math.max(0, Math.min(1, (header + 12 - rect.top) / Math.max(1, rect.height)));
+    renderProgress(s, s.dragRatio ?? (atEnd ? 1 : threadProgress(s, rect, position)), atEnd);
     readerMoreState(s);
     const edge = s.more.getBoundingClientRect();
     const nearEnd = edge.height > 0 && edge.top < window.innerHeight + 240 && edge.bottom > headerBottom();
+    if (!document.hidden && nearEnd) readerFooter(s);
     if (!document.hidden && nearEnd && !s.more.disabled && !s.nextError && !s.initError && !s.loadingNext && !s.nextTimer) {
       s.nextTimer = setTimeout(() => {
         s.nextTimer = null;
@@ -1014,7 +1031,8 @@
       node.dataset.ldtDepth = p.depth;
       const names = node.querySelector('.names');
       if (names && node.classList.contains('topic-owner') && !names.querySelector('.ldt-owner-label')) {
-        const badge = element('span', 'ldt-owner-label', '楼主');
+        const badge = element('span', 'ldt-owner-label', 'OP');
+        badge.title = '话题发起者';
         const author = names.querySelector(':scope > .first');
         if (author) author.after(badge); else names.append(badge);
       }
@@ -1297,7 +1315,8 @@
         .find(n => !n.closest('.embedded-posts'));
       let badge = names?.querySelector('.ldt-owner-label');
       if (names && wrapper.classList.contains('topic-owner')) {
-        if (!badge) badge = element('span', 'ldt-owner-label', '楼主');
+        if (!badge) badge = element('span', 'ldt-owner-label', 'OP');
+        badge.title = '话题发起者';
         const author = names.querySelector(':scope > .first');
         if (author && author.nextElementSibling !== badge) author.after(badge);
         else if (!author && badge.parentElement !== names) names.append(badge);
@@ -1385,7 +1404,7 @@
       return;
     }
     if (!renderedPost(state, number)) location.assign(first ? `/t/topic/${state.id}/1` : date.href);
-    else window.scrollTo({ top: first ? 0 : state.progressStart + state.progressRange, behavior: 'auto' });
+    else window.scrollTo({ top: first ? 0 : Math.max(0, window.scrollY + state.stream.getBoundingClientRect().bottom - window.innerHeight), behavior: 'auto' });
   }, true);
   setInterval(() => { if (enabled && topicId() !== (state?.id || 0)) schedule(); }, 1000);
   if (document.documentElement) refresh();

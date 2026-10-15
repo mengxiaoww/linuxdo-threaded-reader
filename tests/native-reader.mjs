@@ -45,7 +45,7 @@ p200.querySelector('.like').click();assert.equal(actions.at(-1)[0],'native-like'
 p200.querySelector('.discourse-boosts__bubble').click();assert.equal(p200.querySelector('.discourse-boosts__bubble').getAttribute('aria-expanded'),'true','原生 Boost 交互保持');
 assert.equal(d.querySelector('.ldt-owned > [data-post-number="201"]').dataset.ldtDepth,'1');
 assert.equal(d.querySelector('.ldt-owned > [data-post-number="202"]').dataset.ldtDepth,'2','回复的回复递进');
-assert.equal(d.querySelector('.ldt-owned > [data-post-number="202"] .ldt-owner-label').textContent,'楼主');
+assert.equal(d.querySelector('.ldt-owned > [data-post-number="202"] .ldt-owner-label').textContent,'OP');
 assert.ok(views.every(a=>/^ldt-post-\d+$/.test(a.elementId)),'创建模型不可破坏楼号和元素 ID');
 assert.equal(d.querySelector('.ldt-reader-check'),null,'不出现检查新回复按钮');
 assert.ok(d.querySelector('.ldt-owned > [data-post-number="201"] .ldt-relation').textContent.includes('作者200'));
@@ -68,9 +68,9 @@ for (const node of d.querySelectorAll('.ldt-owned > [data-post-number]')) {
 }
 d.querySelector('.ldt-reader-window').getBoundingClientRect=()=>({top:-1116,bottom:1884,height:3000});
 w.dispatchEvent(new w.Event('scroll'));await pause(25);
-assert.equal(d.querySelector('.ldt-progress-rail').getAttribute('aria-valuenow'),'20','页面高度读到一半时，按全话题顶层回复顺序计为 20%，不按已加载区高度误报 50%');
-assert.equal(d.querySelector('.ldt-progress-total').textContent,'顶层回复58 / 997');
-assert.equal(d.querySelector('.ldt-progress-total > span:last-child').textContent,'58 / 997','数量整体排版，不拆散换行');
+assert.equal(d.querySelector('.ldt-progress-rail').getAttribute('aria-valuenow'),'199','定位条按当前顶层回复的全话题序号显示，楼内回复不增加序号');
+assert.equal(d.querySelector('.ldt-progress-total').textContent,'已加载58 条');
+assert.equal(d.querySelector('.ldt-progress-total > span:last-child').textContent,'58 条','数量整体排版，不拆散换行');
 const requestsBeforeTop=calls.length;scroll=1000;d.querySelector('.start-date').click();assert.equal(scroll,0,'已有首帖时点击顶部日期直接回到开头，不刷新页面');assert.equal(calls.length,requestsBeforeTop,'回开头不重新抓取帖子');assert.equal(d.querySelector('.ldt-owned > [data-post-number="200"]'),p200,'回开头保留评论节点');assert.equal(w.getComputedStyle(d.querySelector('.ldt-progress-total')).cursor,'default','统计文本使用箭头光标');
 const endDate=d.querySelector('.now-date');endDate.href='/t/topic/42/259';endDate.click();assert.equal(scroll,10040-w.innerHeight,'已加载末帖时底部日期滚到整个评论区的底端，不受末帖在楼中楼中的位置影响');assert.equal(calls.length,requestsBeforeTop,'定位已加载末帖不重新抓取帖子');assert.equal(d.querySelector('.ldt-owned > [data-post-number="200"]'),p200);
 d.querySelector('[data-mode="quote"]').click();assert.equal(d.querySelector('.ldt-independent'),null);assert.equal(d.querySelector('#original-like'),originalButton,'退出时恢复原流节点和事件');assert.equal(native.classList.contains('ldt-native-hidden'),false);

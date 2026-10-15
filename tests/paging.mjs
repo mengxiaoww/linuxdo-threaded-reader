@@ -35,8 +35,8 @@ if(tail||jump){
  d.querySelector('.ldt-reader-window').getBoundingClientRect=()=>({top:-1000,bottom:600,height:1600});
  w.dispatchEvent(new w.Event('scroll'));await pause(650);
  assert.equal(calls.filter(p=>p.includes('/posts.json?')).length,0,'直接跳末尾不启动历史回复补齐');
- assert.equal(d.querySelector('.ldt-progress-percent').textContent,'100%');
- assert.equal(d.querySelector('.ldt-progress-total').textContent,'已到末尾共 14 条');
+ assert.equal(d.querySelector('.ldt-progress-percent').textContent,'14 / 14');
+ assert.equal(d.querySelector('.ldt-progress-total').textContent,'已加载12 条');
  assert.equal(d.querySelector('.ldt-progress-total').title,'已加载 12 / 共 14 条顶层回复','实际加载数量保留，不伪造满载');
  assert.equal(footer.textContent,'已到帖末');
  if(fast){
@@ -56,13 +56,13 @@ if(tail||jump){
  scroll=500;w.dispatchEvent(new w.Event('scroll'));await pause(25);scroll=400;w.dispatchEvent(new w.Event('scroll'));
  await until(()=>d.querySelector('.ldt-owned >[data-post-number="3"]'),'跳末尾后向上阅读仍自动加载前一批');
  assert.equal(d.querySelector('.ldt-owned >[data-post-number="4"]'),anchor);
- assert.notEqual(d.querySelector('.ldt-progress-percent').textContent,'100%','上滑后进度正常回退');
+ assert.notEqual(d.querySelector('.ldt-progress-percent').textContent,'14 / 14','上滑后进度正常回退');
  assert.equal(d.querySelector('.ldt-progress-total').title,'已加载 14 / 共 14 条顶层回复');
  const paging=calls.filter(p=>p.includes('/posts.json?'));assert.equal(paging.length,1);assert.ok(new URLSearchParams(paging[0].split('?')[1]).getAll('post_ids[]').length<=20,'向上只加载前一批，不扫描全部历史');
  assert.equal(d.querySelector('.ldt-unread'),null,'反向载入的历史回复不标为新回复');
 
  }
- w.close();console.log('PASS: 直接跳末尾立即 100%，不扫描历史；上滑后进度回退并自动加载前一批，保留节点和真实数量');
+ w.close();console.log('PASS: 直接跳末尾立即定位到最后一条顶层回复，不扫描历史；上滑后进度回退并自动加载前一批，保留节点和真实数量');
 }else{
 await until(()=>d.querySelector('.ldt-owned >[data-post-number="2"]'),'统计返回的历史正文直接复用');
 assert.equal(d.querySelector('.ldt-progress-total').title,'已加载 13 / 共 14 条顶层回复','从第 4 层进入时识别第 2、3 层缺失，不能伪造满载');
