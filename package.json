@@ -1,6 +1,6 @@
 {
   "name": "linuxdo-threaded-reader",
-  "version": "6.0.20",
+  "version": "6.1.0",
   "private": true,
   "type": "module",
   "scripts": {

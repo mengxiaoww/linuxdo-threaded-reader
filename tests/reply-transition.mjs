@@ -1,3 +1,4 @@
+import {installNativeTimelineFixture} from './support/native-timeline.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
@@ -7,7 +8,7 @@ async function until(fn,label){for(let i=0;i<180&&!fn();i++)await pause(20);asse
 const post=n=>({id:10000+n,topic_id:42,post_number:n,username:'u'+n,name:'作者'+n,cooked:`<p>正文 ${n}</p>`,reply_count:0,reply_to_post_number:0});
 const ids=Array.from({length:20},(_,i)=>10001+i);
 let rows=Array.from({length:20},(_,i)=>post(1+i));rows[0].boosts=[{cooked:'谢谢分享'}];rows[1].reply_to_post_number=200;rows[2].reply_to_post_number=201;rows[2].username='u1';
-const dom=new JSDOM('<header class="d-header"></header><aside class="timeline-container"><a class="start-date" href="/t/topic/42/1">开始</a><div class="timeline-scrollarea"></div><a class="now-date" href="/t/topic/42/1000">末尾</a></aside><div class="post-stream"><div class="topic-post" data-post-number="200"><article class="boxed"><button id="original-like">原按钮</button></article></div><div class="post-stream--cloaked" data-post-number="800" style="height:200px"></div></div>',{url:'https://linux.do/t/topic/42/200',runScripts:'outside-only',pretendToBeVisual:true});
+const dom=new JSDOM('<header class="d-header"></header><aside class="timeline-container"><div class="timeline-scrollarea-wrapper"><a class="start-date" href="/t/topic/42/1">开始</a><div class="timeline-scrollarea"></div><a class="now-date" href="/t/topic/42/1000">末尾</a></div></aside><div class="post-stream"><div class="topic-post" data-post-number="200"><article class="boxed"><button id="original-like">原按钮</button></article></div><div class="post-stream--cloaked" data-post-number="800" style="height:200px"></div></div>',{url:'https://linux.do/t/topic/42/200',runScripts:'outside-only',pretendToBeVisual:true});
 const w=dom.window,d=w.document;let poll;const interval=w.setInterval.bind(w);w.setInterval=(fn,ms)=>{if(ms===60000)poll=fn;return interval(fn,ms)};const calls=[],actions=[],views=[];let saved={};let scroll=0,pages=0,newReply=false;
 Object.defineProperty(w,'scrollY',{get:()=>scroll});w.scrollTo=({top})=>scroll=Math.max(0,top);w.scrollBy=(arg,delta)=>scroll=Math.max(0,scroll+(typeof arg==='object'?arg.top:delta));
 const topic={id:42,posts_count:20,details:{can_create_post:true},postStream:{posts:rows,stream:ids}};
@@ -49,6 +50,7 @@ native.innerHTML=rows.map(p=>`<div class="topic-post" data-post-number="${p.post
 const rect=w.HTMLElement.prototype.getBoundingClientRect;
 w.HTMLElement.prototype.getBoundingClientRect=function(){return this.dataset.postNumber==='2'?{top:1100-scroll,bottom:1400-scroll,height:300}:rect.call(this)};
 scroll=1000;
+installNativeTimelineFixture(w);
 w.eval(source);
 await until(()=>native.classList.contains('ldt-thread'),'20 帖原生楼中楼初始化');
 assert.equal(d.querySelector('.ldt-independent'),null,'短帖先使用原流');

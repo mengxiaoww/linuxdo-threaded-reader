@@ -36,6 +36,7 @@ assert.equal(threadProgress({...deep,allowStart:true}, rect, 0),0,'明确点顶�
 s.rootIds.set(60,4);
 assert.equal(threadProgress(s, rect, 1), .8, '新增顶层回复会增加总数，新增楼内回复不会');
 const precise={reader:{},rootIds:new Map(Array.from({length:23},(_,i)=>[i,i])),raw:new Map(),progress:w.document.createElement('div')};
-precise.progress.innerHTML='<span class="ldt-progress-caption"></span><button class="ldt-progress-rail"></button><span class="ldt-progress-percent"></span><span class="ldt-progress-total"></span>';
-for(let i=0;i<23;i++){w.progressTest.renderProgress(precise,i/23);assert.equal(precise.progress.querySelector('.ldt-progress-percent').textContent,`${i+1} / 23`,'浮点边界不显示成上一条');}
+precise.progress.innerHTML='<span class="ldt-progress-total"></span>';
+let reading;precise.timelineComponent={postScrolled(){reading=precise.timelineReading}};
+for(let i=0;i<23;i++){w.progressTest.renderProgress(precise,i/23);assert.equal(reading.postIndex,i+1,'浮点边界不显示成上一条');}
 w.close(); console.log('PASS: 顶层回复等权进度、嵌套回复、首帖排除、短帖、未加载部分、深链接、总数未知、末尾 100%');

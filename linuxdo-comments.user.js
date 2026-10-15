@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Linux DO 楼中楼阅读
 // @namespace    local.linuxdo.threaded-reading
-// @version      6.0.20
+// @version      6.1.0
 // @description  长帖按需加载、楼中楼递进连线、未读提示与引用切换，保留论坛原生操作。
 // @match        https://linux.do/*
 // @run-at       document-start
@@ -235,21 +235,13 @@
     .topic-map__stats:has(> .ldt-modebar) .topic-map__users-list { min-width: 0; overflow: hidden; }
     .post-stream > .ldt-modebar { justify-content: flex-end; margin: 0; padding: 4px 0; }
     [data-ldt-native-progress] { display: none !important; }
-    .ldt-reading-progress { display: flex; flex-direction: column; gap: 8px; height: 300px; width: 140px; max-width: 100%; }
-    .ldt-progress-caption, .ldt-progress-total { font-size: 12px; line-height: 1.5; color: var(--primary-medium, #777); }
-    .ldt-progress-total { display: flex; flex-wrap: wrap; gap: 2px 6px; font-size: 11px; font-variant-numeric: tabular-nums; cursor: default; user-select: none; }
+    .ldt-native-timeline .title, .ldt-native-timeline .timeline-controls, .ldt-native-timeline .timeline-footer-controls { display: none; }
+    .ldt-progress-total { display: flex; gap: 2px 6px; margin: 8px 0; font-size: 11px; line-height: 1.5; color: var(--primary-medium, #777); font-variant-numeric: tabular-nums; cursor: default; user-select: none; }
     .ldt-progress-total > span { white-space: nowrap; }
-    .ldt-progress-rail { position: relative; flex: 1; width: 100%; padding: 0; border: 0; background: transparent; touch-action: none; cursor: ns-resize; }
-    .ldt-progress-rail::before { content: ""; position: absolute; left: 8px; top: 10px; bottom: 10px; width: 2px; background: var(--primary-low, #ddd); }
-    .ldt-progress-fill { position: absolute; left: 8px; top: 10px; width: 2px; height: calc((100% - 20px) * var(--ldt-progress, 0)); background: var(--tertiary, #3979a3); }
-    .ldt-progress-handle { position: absolute; left: 6px; top: calc((100% - 20px) * var(--ldt-progress, 0)); width: 6px; height: 20px; border-radius: 4px; background: var(--tertiary, #3979a3); }
-    .ldt-progress-percent { position: absolute; left: 23px; top: calc((100% - 20px) * var(--ldt-progress, 0)); font-size: 16px; font-weight: 600; line-height: 20px; color: var(--primary, #333); }
     #topic-progress[data-ldt-mobile-progress] { display: flex; align-items: center; justify-content: center; box-sizing: border-box; height: auto; min-height: 40px; padding: 4px 10px; border: 1px solid var(--primary-low, #ddd); border-radius: 6px; background: var(--secondary, #fff); }
     #topic-progress[data-ldt-mobile-progress] > .nums,
     #topic-progress[data-ldt-mobile-progress] > .bg { display: none !important; }
     .ldt-progress-mobile { display: block; color: var(--primary, #333); font-size: 12px; font-weight: 600; line-height: 1.5; white-space: nowrap; }
-    .ldt-progress-rail:focus-visible { outline: none; }
-    .ldt-progress-rail:focus-visible .ldt-progress-handle { outline: 2px solid var(--tertiary, #3979a3); outline-offset: 3px; }
     .ldt-auto-quote blockquote { white-space: pre-wrap; overflow-wrap: anywhere; }
     @media (max-width: 640px) {
       .ldt-reader-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; }
@@ -632,6 +624,8 @@
   }
 
   function clearProgress(s) {
+    if (s.timelineView) { try { (s.renderer || nativeRenderer()).run(() => s.timelineView.destroy()); } catch {} }
+    s.timelineView = s.timelineComponent = null;
     s.progress?.remove();
     s.progress = null;
     s.mobileProgress?.remove();
@@ -686,7 +680,16 @@
     const total = progressTotal(s);
     const index = progress === null || total === undefined ? null : total ? Math.min(total, Math.floor(progress * total + 1e-7) + 1) : 0;
     const text = index === null ? '统计中' : `${index} / ${total}`;
-    const ratio = s.dragRatio ?? (index === null || total <= 1 ? progress || 0 : (index - 1) / (total - 1));
+    const candidates = [...document.querySelectorAll('.timeline-fullscreen .timeline-scrollarea-wrapper, .timeline-container .timeline-scrollarea-wrapper')].filter(node => !node.closest('.ldt-native-timeline'));
+    const native = candidates.find(node => node.closest('.timeline-fullscreen')) || candidates[0];
+    if (!total && s.progress) clearProgress(s);
+    if (native && total > 0) {
+      if (s.progress && s.progress.previousElementSibling !== native) clearProgress(s);
+      if (!s.progress) {
+        try { s.progress = progressPanel(s, native); native.dataset.ldtNativeProgress = ''; }
+        catch (error) { if (!s.timelineError) console.warn('[Linux DO 楼中楼] 原生时间轴未接入', error); s.timelineError = true; }
+      }
+    }
     const mobile = document.querySelector('#topic-progress');
     if (mobile) {
       if (!s.mobileProgress) s.mobileProgress = element('span', 'ldt-progress-mobile');
@@ -694,18 +697,9 @@
       if (s.mobileProgress.parentElement !== mobile) mobile.append(s.mobileProgress);
       if (s.mobileProgress.textContent !== `回复 ${text}`) s.mobileProgress.textContent = `回复 ${text}`;
     }
-    if (!s.progress) return;
-    const rail = s.progress.querySelector('.ldt-progress-rail');
-    rail.style.setProperty('--ldt-progress', ratio);
-    rail.disabled = index === null || !total;
-    rail.setAttribute('aria-valuemax', Math.max(1, total || 0));
-    if (index === null) rail.removeAttribute('aria-valuenow'); else rail.setAttribute('aria-valuenow', index);
-    rail.setAttribute('aria-valuetext', index === null ? '正在统计顶层回复' : `第 ${index} 条顶层回复，共 ${total} 条`);
-    const label = s.progress.querySelector('.ldt-progress-percent');
-    if (label.textContent !== text) label.textContent = text;
-    const caption = s.progress.querySelector('.ldt-progress-caption');
-    if (caption.textContent !== '顶层回复') caption.textContent = '顶层回复';
-    progressCount(s.progress.querySelector('.ldt-progress-total'), rootCountLabel(s), atEnd);
+    s.timelineReading = { postIndex: index || 1, percent: Math.min(1, (progress || 0) + 1e-7 / Math.max(1, total || 0)) };
+    s.timelineComponent?.postScrolled();
+    if (s.progress) progressCount(s.progress.querySelector('.ldt-progress-total'), rootCountLabel(s), atEnd);
   }
 
   async function locateRoot(s, ratio) {
@@ -721,7 +715,7 @@
       } else {
         const id = [...s.rootIds.keys()][index];
         let post = [...s.raw.values()].find(p => p.id === id);
-        if (post && s.nodes.has(post.post_number)) {
+        if (post && readerCachedPage(s, post)) {
           s.tailOnly = false;
           if (!index) s.allowStart = true;
           readerJump(s, post.post_number);
@@ -747,50 +741,104 @@
     }
   }
 
-  function progressPanel(s) {
-    const panel = element('div', 'ldt-reading-progress');
-    const rail = element('button', 'ldt-progress-rail');
-    rail.type = 'button';
-    rail.setAttribute('role', 'slider'); rail.setAttribute('aria-label', '按顶层回复定位');
-    rail.setAttribute('aria-orientation', 'vertical'); rail.setAttribute('aria-valuemin', '1');
-    rail.append(element('span', 'ldt-progress-fill'), element('span', 'ldt-progress-handle'), element('span', 'ldt-progress-percent'));
-    const preview = event => {
-      const box = rail.getBoundingClientRect();
-      s.dragRatio = Math.max(0, Math.min(1, (event.clientY - box.top - 10) / Math.max(1, box.height - 20)));
-      renderProgress(s, s.dragRatio);
+  function readerCachedPage(s, post) {
+    if (!s.nodes.has(post.post_number)) return false;
+    const index = s.ids.indexOf(post.id);
+    if (index >= (s.headCursor || 0) && index < s.cursor) return true;
+    const loaded = new Set([...s.raw.values()].map(p => p.id));
+    return s.ids.length > 0 && s.ids.every(id => loaded.has(id));
+  }
+
+  function jumpToEnd(s, url = `/t/topic/${s.id}/${s.highest || s.total}`) {
+    s.locating = null; s.dragRatio = undefined; clearTimeout(s.nextTimer); s.nextTimer = null;
+    const number = Number(new URL(url, location.href).pathname.split('/').filter(Boolean).at(-1));
+    if (s.reader && s.raw.has(number) && readerCachedPage(s, s.raw.get(number))) {
+      s.tailOnly = true; s.allowStart = !s.headCursor; readerEnd(s);
+    } else if (!s.reader && renderedPost(s, number)) {
+      window.scrollTo({ top: Math.max(0, window.scrollY + s.stream.getBoundingClientRect().bottom - window.innerHeight), behavior: 'auto' });
+    } else {
+      if (s.reader) { try { sessionStorage.setItem('ldt-jump-end', String(s.id)); } catch {} }
+      location.assign(url);
+    }
+  }
+
+  function nativeTimelineModel(s, model) {
+    let roots, list;
+    const ids = () => {
+      if (!s.reader) return model.postStream.posts.filter(p => p.post_number > 1 && !p.reply_to_post_number).sort((a, b) => a.post_number - b.post_number).map(p => p.id);
+      if (roots !== s.rootIds) { roots = s.rootIds; list = [...(roots?.keys() || [])]; }
+      return list || [];
     };
-    rail.addEventListener('pointerdown', event => {
-      if (event.button !== 0 || rail.disabled) return;
-      event.preventDefault(); clearTimeout(s.nextTimer); s.nextTimer = null; s.locating = null; s.locateError = false;
-      rail.focus(); rail.setPointerCapture(event.pointerId); preview(event);
+    const stream = new Proxy(model.postStream, {
+      get(target, key) {
+        if (key === 'stream') return ids();
+        if (key === 'filteredPostsCount') return ids().length;
+        if (key === 'isMegaTopic') return false;
+        if (key === 'closestDaysAgoFor') return index => target.closestDaysAgoFor(target.stream.indexOf(ids()[index - 1]) + 1);
+        if (key === 'excerpt') return index => target.excerpt(target.stream.indexOf(ids()[index]));
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
     });
-    rail.addEventListener('pointermove', event => { if (rail.hasPointerCapture(event.pointerId)) preview(event); });
-    rail.addEventListener('pointerup', event => {
-      if (!rail.hasPointerCapture(event.pointerId)) return;
-      preview(event);
-      const ratio = s.dragRatio; s.dragRatio = undefined;
-      rail.releasePointerCapture(event.pointerId); locateRoot(s, ratio);
+    return new Proxy(model, {
+      get(target, key) {
+        if (key === 'postStream') return stream;
+        if (key === 'get') return path => path === 'postStream' ? stream : path.startsWith('postStream.') ? stream[path.slice(11)] : target.get(path);
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
     });
-    rail.addEventListener('pointercancel', () => { s.dragRatio = undefined; updateProgress(s); });
-    rail.addEventListener('keydown', event => {
-      const total = progressTotal(s), index = Number(rail.getAttribute('aria-valuenow')) - 1;
-      const target = { ArrowUp: index - 1, ArrowDown: index + 1, PageUp: index - 10, PageDown: index + 10, Home: 0, End: (total || 1) - 1 }[event.key];
-      if (total && target !== undefined) { event.preventDefault(); locateRoot(s, (Math.max(0, Math.min(total - 1, target)) + .5) / total); }
-    });
-    panel.append(element('span', 'ldt-progress-caption'), rail, element('span', 'ldt-progress-total'));
+  }
+
+  function progressPanel(s, native) {
+    const r = s.renderer || nativeRenderer();
+    const load = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window).require;
+    const Timeline = load('discourse/components/topic-timeline/container').default;
+    const { getComponentTemplate, setComponentTemplate } = load('@ember/component');
+    const scrolled = Object.getOwnPropertyDescriptor(Timeline.prototype, 'postScrolled');
+    // 直接使用原站组件的模板、轨道、拖动与预览；只替换筛选数据及定位出口。
+    class FilteredTimeline extends Timeline {
+      constructor(...args) { super(...args); s.timelineComponent = this; }
+      get postScrolled() {
+        const original = scrolled.get ? scrolled.get.call(this) : scrolled.value;
+        const handler = () => {
+          if (s !== state || mode !== 'thread' || this.isDestroying || this.isDestroyed || this.dragging || s.dragRatio !== undefined || s.locating) return;
+          original.call(this, s.timelineReading || { postIndex: 1, percent: 0 });
+        };
+        Object.defineProperty(this, 'postScrolled', { value: handler, configurable: true });
+        return handler;
+      }
+    }
+    setComponentTemplate(getComponentTemplate(Timeline), FilteredTimeline);
+    const panel = element('div', 'ldt-native-timeline'); panel.setAttribute('aria-label', '顶层回复进度');
+    const target = element('div', ''); panel.append(target, element('div', 'ldt-progress-total'));
+    const args = {
+      model: nativeTimelineModel(s, r.controller.model), enteredIndex: 0,
+      fullscreen: !!native.closest('.timeline-fullscreen'),
+      setDocked() {}, setDockedBottom() {},
+      jumpToIndex(index) { s.dragRatio = undefined; return locateRoot(s, (index - .5) / progressTotal(s)); },
+      jumpEnd() { s.dragRatio = undefined; return jumpToEnd(s, r.controller.model.lastPostUrl || undefined); },
+    };
+    const properties = { renderGlimmer: { _registrations: [{ element: target, component: r.curry(FilteredTimeline, args, r.owner) }] } };
+    r.setOwner(properties, r.owner);
+    const view = r.Component.extend({ layout: r.template }).create(properties);
+    native.after(panel);
+    try { r.run(() => view.appendTo(panel)); } catch (error) { r.run(() => view.destroy()); panel.remove(); throw error; }
+    s.timelineView = view;
+    // 新一次原生操作开始即作废上一次异步定位，不改写原生指针手势。
+    panel.addEventListener('pointerdown', event => {
+      if (event.button !== 0 || !event.target.closest('.timeline-scrollarea')) return;
+      clearTimeout(s.nextTimer); s.nextTimer = null; s.locating = null; s.locateError = false; s.dragRatio = 0;
+    }, true);
+    const released = () => queueMicrotask(() => { s.dragRatio = undefined; scheduleProgress(); });
+    panel.addEventListener('pointerup', released, true);
+    panel.addEventListener('pointercancel', released, true);
     return panel;
   }
 
   function updateProgress(s) {
     if (!s.reader) updateUnread(s);
     if (mode !== 'thread') { clearProgress(s); return; }
-    const native = document.querySelector('.timeline-fullscreen .timeline-scrollarea') || document.querySelector('.timeline-container .timeline-scrollarea');
-    if (native) {
-      if (!s.progress) s.progress = progressPanel(s);
-      native.dataset.ldtNativeProgress = '';
-      if (native.nextElementSibling !== s.progress) native.after(s.progress);
-      s.progress.style.height = native.style.height || '300px';
-    }
     if (s.reader) { updateReader(s); return; }
     const rect = s.stream.getBoundingClientRect();
     const position = Math.max(0, Math.min(1, (headerBottom() + 12 - rect.top) / Math.max(1, rect.height)));
@@ -888,7 +936,7 @@
   function updateReader(s) {
     if (s !== state) return;
     const boundary = readerStartBoundary(s);
-    if (boundary !== null && s.lastScrollY !== undefined && window.scrollY < s.lastScrollY - 2 && window.scrollY < boundary - 2) {
+    if (s.dragRatio === undefined && !s.locating && boundary !== null && s.lastScrollY !== undefined && window.scrollY < s.lastScrollY - 2 && window.scrollY < boundary - 2) {
       window.scrollTo({ top: boundary, behavior: 'auto' });
       readerPrevious(s);
     }
@@ -953,6 +1001,7 @@
     const node = s.nodes.get(number);
     if (!node) { location.assign(`/t/topic/${s.id}/${number}`); return; }
     window.scrollTo({ top: window.scrollY + node.getBoundingClientRect().top - headerBottom() - 12, behavior: 'auto' });
+    s.lastScrollY = window.scrollY;
     node.classList.add('ldt-focus');
     setTimeout(() => node.classList.remove('ldt-focus'), 1600);
     updateReader(s);
@@ -962,6 +1011,7 @@
     const composer = document.querySelector('#reply-control.open');
     const bottom = Math.min(window.innerHeight, composer ? composer.getBoundingClientRect().top : Infinity);
     window.scrollTo({ top: Math.max(0, window.scrollY + s.more.getBoundingClientRect().bottom - bottom), behavior: 'auto' });
+    s.lastScrollY = window.scrollY;
     updateReader(s);
   }
 
@@ -1441,19 +1491,17 @@
     if (!date) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    const first = date.classList.contains('start-date');
-    const number = first ? 1 : Number(new URL(date.href, location.href).pathname.split('/').filter(Boolean).at(-1));
+    state.locating = null; state.dragRatio = undefined; clearTimeout(state.nextTimer); state.nextTimer = null;
+    if (!date.classList.contains('start-date')) { jumpToEnd(state, date.href); return; }
     if (state.reader) {
-      if (first && state.nodes.has(1)) { state.tailOnly = false; state.allowStart = true; window.scrollTo({ top: 0, behavior: 'auto' }); updateProgress(state); }
-      else if (state.nodes.has(number)) { state.tailOnly = true; state.allowStart = !state.headCursor; readerEnd(state); }
-      else {
-        if (!first) { try { sessionStorage.setItem('ldt-jump-end', String(state.id)); } catch {} }
-        location.assign(first ? `/t/topic/${state.id}/1` : date.href);
-      }
-      return;
-    }
-    if (!renderedPost(state, number)) location.assign(first ? `/t/topic/${state.id}/1` : date.href);
-    else window.scrollTo({ top: first ? 0 : Math.max(0, window.scrollY + state.stream.getBoundingClientRect().bottom - window.innerHeight), behavior: 'auto' });
+      // 单独补取的首帖不代表首屏回复已加载，深链接回开头交给原站重建首屏。
+      const firstPage = state.ids.slice(0, Math.min(20, state.ids.length));
+      const loaded = new Set([...state.raw.values()].map(post => post.id));
+      if (!firstPage.every(id => loaded.has(id))) { location.assign(`/t/topic/${state.id}/1`); return; }
+      state.tailOnly = false; state.allowStart = true;
+      window.scrollTo({ top: 0, behavior: 'auto' }); updateProgress(state);
+    } else if (renderedPost(state, 1)) window.scrollTo({ top: 0, behavior: 'auto' });
+    else location.assign(`/t/topic/${state.id}/1`);
   }, true);
   setInterval(() => { if (enabled && topicId() !== (state?.id || 0)) schedule(); }, 1000);
   if (document.documentElement) refresh();

@@ -1,3 +1,4 @@
+import {installNativeTimelineFixture} from './support/native-timeline.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
@@ -9,7 +10,7 @@ async function until(fn,label){for(let i=0;i<180&&!fn();i++)await pause(20);asse
 const post=n=>({id:10000+n,topic_id:42,post_number:n,username:'u'+n,name:'作者'+n,cooked:`<p>正文 ${n}</p>`,reply_count:0,reply_to_post_number:0});
 const ids=Array.from({length:23},(_,i)=>10001+i);
 const all=Array.from({length:23},(_,i)=>post(i+1));for(const [n,parent] of [[9,8],[11,4],[12,11],[13,12],[15,12],[17,13],[18,17],[21,20]])all[n-1].reply_to_post_number=parent;let rows=all.slice(3);
-const dom=new JSDOM('<header class="d-header"></header><aside class="timeline-container"><a class="start-date" href="/t/topic/42/1">开始</a><div class="timeline-scrollarea"></div><a class="now-date" href="/t/topic/42/1000">末尾</a></aside><div class="post-stream"><div class="topic-post" data-post-number="200"><article class="boxed"><button id="original-like">原按钮</button></article></div><div class="post-stream--cloaked" data-post-number="800" style="height:200px"></div></div>',{url:`https://linux.do/t/topic/42/${tail?23:4}`,runScripts:'outside-only',pretendToBeVisual:true});
+const dom=new JSDOM('<header class="d-header"></header><aside class="timeline-container"><div class="timeline-scrollarea-wrapper"><a class="start-date" href="/t/topic/42/1">开始</a><div class="timeline-scrollarea"></div><a class="now-date" href="/t/topic/42/1000">末尾</a></div></aside><div class="post-stream"><div class="topic-post" data-post-number="200"><article class="boxed"><button id="original-like">原按钮</button></article></div><div class="post-stream--cloaked" data-post-number="800" style="height:200px"></div></div>',{url:`https://linux.do/t/topic/42/${tail?23:4}`,runScripts:'outside-only',pretendToBeVisual:true});
 const w=dom.window,d=w.document;let poll;const interval=w.setInterval.bind(w);w.setInterval=(fn,ms)=>{if(ms===60000)poll=fn;return interval(fn,ms)};const calls=[],actions=[],views=[];let saved={};let scroll=0,pages=0,newReply=false;
 Object.defineProperty(w,'scrollY',{get:()=>scroll});w.scrollTo=({top})=>scroll=Math.max(0,top);w.scrollBy=(arg,delta)=>scroll=Math.max(0,scroll+(typeof arg==='object'?arg.top:delta));
 const topic={id:42,posts_count:23,details:{can_create_post:true},postStream:{posts:rows,stream:ids}};
@@ -27,7 +28,8 @@ w.fetch=async path=>{calls.push(path);return{ok:true,json:async()=>{
  if(path.includes('/posts.json?')){if(fast)await previousGate;const requested=new URLSearchParams(path.split('?')[1]).getAll('post_ids[]').map(Number);return{post_stream:{posts:all.filter(p=>requested.includes(p.id))}}}
  throw Error(path);
 }}};
-const native=d.querySelector('.post-stream');if(jump)w.sessionStorage.setItem('ldt-jump-end','42');w.eval(source);
+const native=d.querySelector('.post-stream');if(jump)w.sessionStorage.setItem('ldt-jump-end','42');installNativeTimelineFixture(w);
+w.eval(source);
 if(tail||jump){
  await until(()=>d.querySelector('.ldt-progress-total')?.title,'取得全话题顶层回复总数');
  assert.equal(d.querySelector('.ldt-owned >[data-post-number="2"]'),null,'直接跳末尾不补拉旧正文');
@@ -35,7 +37,7 @@ if(tail||jump){
  d.querySelector('.ldt-reader-window').getBoundingClientRect=()=>({top:-1000,bottom:600,height:1600});
  w.dispatchEvent(new w.Event('scroll'));await pause(650);
  assert.equal(calls.filter(p=>p.includes('/posts.json?')).length,0,'直接跳末尾不启动历史回复补齐');
- assert.equal(d.querySelector('.ldt-progress-percent').textContent,'14 / 14');
+ assert.equal(d.querySelector('.ldt-native-timeline .timeline-replies').textContent,'14 / 14');
  assert.equal(d.querySelector('.ldt-progress-total').textContent,'已加载12 条');
  assert.equal(d.querySelector('.ldt-progress-total').title,'已加载 12 / 共 14 条顶层回复','实际加载数量保留，不伪造满载');
  assert.equal(footer.textContent,'已到帖末');
@@ -56,7 +58,7 @@ if(tail||jump){
  scroll=500;w.dispatchEvent(new w.Event('scroll'));await pause(25);scroll=400;w.dispatchEvent(new w.Event('scroll'));
  await until(()=>d.querySelector('.ldt-owned >[data-post-number="3"]'),'跳末尾后向上阅读仍自动加载前一批');
  assert.equal(d.querySelector('.ldt-owned >[data-post-number="4"]'),anchor);
- assert.notEqual(d.querySelector('.ldt-progress-percent').textContent,'14 / 14','上滑后进度正常回退');
+ assert.notEqual(d.querySelector('.ldt-native-timeline .timeline-replies').textContent,'14 / 14','上滑后进度正常回退');
  assert.equal(d.querySelector('.ldt-progress-total').title,'已加载 14 / 共 14 条顶层回复');
  const paging=calls.filter(p=>p.includes('/posts.json?'));assert.equal(paging.length,1);assert.ok(new URLSearchParams(paging[0].split('?')[1]).getAll('post_ids[]').length<=20,'向上只加载前一批，不扫描全部历史');
  assert.equal(d.querySelector('.ldt-unread'),null,'反向载入的历史回复不标为新回复');

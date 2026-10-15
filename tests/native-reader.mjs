@@ -1,3 +1,4 @@
+import {installNativeTimelineFixture} from './support/native-timeline.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
@@ -7,7 +8,7 @@ async function until(fn,label){for(let i=0;i<180&&!fn();i++)await pause(20);asse
 const post=n=>({id:10000+n,topic_id:42,post_number:n,username:'u'+n,name:'作者'+n,cooked:`<p>正文 ${n}</p>`,reply_count:0,reply_to_post_number:0});
 const ids=Array.from({length:1000},(_,i)=>10001+i);
 let rows=Array.from({length:20},(_,i)=>post(200+i));rows[0].boosts=[{cooked:'谢谢分享'}];rows[1].reply_to_post_number=200;rows[2].reply_to_post_number=201;rows[2].username='u1';
-const dom=new JSDOM('<header class="d-header"></header><aside class="timeline-container"><a class="start-date" href="/t/topic/42/1">开始</a><div class="timeline-scrollarea"></div><a class="now-date" href="/t/topic/42/1000">末尾</a></aside><div class="post-stream"><div class="topic-post" data-post-number="200"><article class="boxed"><button id="original-like">原按钮</button></article></div><div class="post-stream--cloaked" data-post-number="800" style="height:200px"></div></div>',{url:'https://linux.do/t/topic/42/200',runScripts:'outside-only',pretendToBeVisual:true});
+const dom=new JSDOM('<header class="d-header"></header><aside class="timeline-container"><div class="timeline-scrollarea-wrapper"><a class="start-date" href="/t/topic/42/1">开始</a><div class="timeline-scrollarea"></div><a class="now-date" href="/t/topic/42/1000">末尾</a></div></aside><div class="post-stream"><div class="topic-post" data-post-number="200"><article class="boxed"><button id="original-like">原按钮</button></article></div><div class="post-stream--cloaked" data-post-number="800" style="height:200px"></div></div>',{url:'https://linux.do/t/topic/42/200',runScripts:'outside-only',pretendToBeVisual:true});
 const w=dom.window,d=w.document;let poll;const interval=w.setInterval.bind(w);w.setInterval=(fn,ms)=>{if(ms===60000)poll=fn;return interval(fn,ms)};const calls=[],actions=[],views=[];let saved={};let scroll=0,pages=0,newReply=false;
 Object.defineProperty(w,'scrollY',{get:()=>scroll});w.scrollTo=({top})=>scroll=Math.max(0,top);w.scrollBy=(arg,delta)=>scroll=Math.max(0,scroll+(typeof arg==='object'?arg.top:delta));
 const topic={id:42,posts_count:1000,details:{can_create_post:true},postStream:{posts:rows,stream:ids}};
@@ -31,6 +32,7 @@ w.fetch=async path=>{calls.push(path);return{ok:true,json:async()=>{
 const native=d.querySelector('.post-stream'),before=native.innerHTML,originalButton=d.querySelector('#original-like');
 d.addEventListener('click',event=>{if(event.target.closest?.('.timeline-container .start-date, .timeline-container .now-date')){event.preventDefault();event.stopImmediatePropagation();scroll=999}},true);
 const navigations=[];w.navigate=path=>navigations.push(path);
+installNativeTimelineFixture(w);
 w.eval(source.replaceAll('location.assign(', 'window.navigate('));assert.equal(native.classList.contains('ldt-native-hidden'),false,'初始化期间先保留原页面，避免空白闪烁');await until(()=>d.querySelector('.ldt-owned > [data-post-number="219"]'),'完整原生帖子挂载');
 assert.equal(native.innerHTML,before,'原列表节点与占位不改写');
 assert.ok(!calls.includes('/t/42/200.json'),'历史返回已有原生帖子模型时直接复用，避免重新请求后才恢复样式');
@@ -70,11 +72,11 @@ for (const node of d.querySelectorAll('.ldt-owned > [data-post-number]')) {
 }
 d.querySelector('.ldt-reader-window').getBoundingClientRect=()=>({top:-1116,bottom:1884,height:3000});
 w.dispatchEvent(new w.Event('scroll'));await pause(25);
-assert.equal(d.querySelector('.ldt-progress-rail').getAttribute('aria-valuenow'),'199','定位条按当前顶层回复的全话题序号显示，楼内回复不增加序号');
+assert.equal(d.querySelector('.ldt-native-timeline .timeline-replies').textContent,'199 / 997','定位条按当前顶层回复的全话题序号显示，楼内回复不增加序号');
 assert.equal(d.querySelector('.ldt-progress-total').textContent,'已加载58 条');
 assert.equal(d.querySelector('.ldt-progress-total > span:last-child').textContent,'58 条','数量整体排版，不拆散换行');
-const requestsBeforeTop=calls.length;scroll=1000;d.querySelector('.start-date').click();assert.equal(scroll,0,'已有首帖时点击顶部日期直接回到开头，不刷新页面');assert.equal(calls.length,requestsBeforeTop,'回开头不重新抓取帖子');assert.equal(d.querySelector('.ldt-owned > [data-post-number="200"]'),p200,'回开头保留评论节点');assert.equal(w.getComputedStyle(d.querySelector('.ldt-progress-total')).cursor,'default','统计文本使用箭头光标');
-const endDate=d.querySelector('.now-date');endDate.href='/t/topic/42/259';endDate.click();assert.equal(scroll,10040-w.innerHeight,'已加载末帖时底部日期滚到整个评论区的底端，不受末帖在楼中楼中的位置影响');assert.equal(calls.length,requestsBeforeTop,'定位已加载末帖不重新抓取帖子');assert.equal(d.querySelector('.ldt-owned > [data-post-number="200"]'),p200);
+const requestsBeforeTop=calls.length;scroll=1000;d.querySelector('.start-date').click();assert.equal(navigations.at(-1),'/t/topic/42/1','只有单独缓存首帖，首屏回复未加载时交回原生导航，不能跳过前段');assert.equal(calls.length,requestsBeforeTop);assert.equal(d.querySelector('.ldt-owned > [data-post-number="200"]'),p200);assert.equal(w.getComputedStyle(d.querySelector('.ldt-progress-total')).cursor,'default');
+const scrollBeforeEnd=scroll,endDate=d.querySelector('.now-date');endDate.href='/t/topic/42/259';endDate.click();assert.equal(scroll,scrollBeforeEnd+10040-w.innerHeight,'已加载末帖时底部日期滚到整个评论区的底端，不受末帖在楼中楼中的位置影响');assert.equal(calls.length,requestsBeforeTop,'定位已加载末帖不重新抓取帖子');assert.equal(d.querySelector('.ldt-owned > [data-post-number="200"]'),p200);
 endDate.href='/t/topic/42/1000';endDate.click();assert.equal(navigations.at(-1),endDate.href,'末帖未缓存时允许导航获取，原站点击监听不能抢先处理');
 d.querySelector('[data-mode="quote"]').click();assert.equal(d.querySelector('.ldt-independent'),null);assert.equal(d.querySelector('#original-like'),originalButton,'退出时恢复原流节点和事件');assert.equal(native.classList.contains('ldt-native-hidden'),false);
 scroll=0;d.querySelector('.start-date').click();assert.equal(scroll,999,'引用模式仍交给原站日期处理');
