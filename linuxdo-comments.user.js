@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Linux DO 楼中楼阅读
 // @namespace    local.linuxdo.threaded-reading
-// @version      6.1.1
+// @version      6.1.2
 // @description  长帖按需加载、楼中楼递进连线、未读提示与引用切换，保留论坛原生操作。
 // @match        https://linux.do/*
 // @run-at       document-start
@@ -870,6 +870,14 @@
     if (!state) return;
     state.stopReplySync?.();
     state.abort.abort();
+    if (state.nativeContext) {
+      const { stream, added } = state.nativeContext;
+      state.renderer.run(() => {
+        stream.posts.splice(0, stream.posts.length, ...stream.posts.filter(post => !added.has(post.id)));
+        stream.notifyPropertyChange?.('loadedAllPosts');
+        stream.notifyPropertyChange?.('firstPostPresent');
+      });
+    }
     if (state.reader) { state.autoReplies?.disconnect(); clearTimeout(state.autoTimer); clearTimeout(state.readTimer); clearTimeout(state.nextTimer); clearInterval(state.checkTimer); for (const view of state.views.values()) { try { state.renderer.run(() => view.destroy()); } catch {} } state.host.remove(); state.native.classList.remove("ldt-native-hidden"); }
     state.notice?.remove();
     clearProgress(state);
@@ -911,12 +919,26 @@
     return tops.length ? Math.max(0, window.scrollY + Math.min(...tops) - headerBottom() - 12) : null;
   }
 
+  function readerNativeContext(s, posts) {
+    const stream = s.renderer.controller.model.postStream;
+    if (typeof stream.appendPost !== 'function' || typeof stream.prependPost !== 'function') return;
+    const context = s.nativeContext ||= { stream, added: new Set() };
+    s.renderer.run(() => {
+      for (const raw of posts) {
+        if (!raw || stream.posts.some(post => post.id === raw.id)) continue;
+        const post = typeof raw.set === 'function' ? raw : s.renderer.store.createRecord('post', { ...raw });
+        context.added.add(post.id);
+        if (post.post_number === 1) stream.prependPost(post); else stream.appendPost(post);
+      }
+    });
+  }
+
   async function readerFooter(s) {
     const controller = s.renderer.controller, model = controller.model, stream = model?.postStream;
-    if (s !== state || Number(model?.id) !== s.id || !stream || typeof stream.updateFromJson !== 'function' || typeof model.updateFromJson !== 'function' || s.footerLoading || Date.now() < (s.footerRetryAt || 0) || s.footerHighest === s.highest && stream.loadedAllPosts) return;
+    if (s !== state || Number(model?.id) !== s.id || !stream || typeof stream.appendPost !== 'function' || typeof model.updateFromJson !== 'function' || s.footerLoading || Date.now() < (s.footerRetryAt || 0) || s.footerHighest === s.highest && stream.loadedAllPosts) return;
     s.footerLoading = true;
     try {
-      // 提前补齐原生帖流的真实末页，让原生页尾在读到末尾之前准备好。
+      // 只补真实末帖以准备原生页尾，不用 updateFromJson 清空当前分页窗口。
       if (!stream.loadedAllPosts || model.suggested_topics === undefined && model.related_topics === undefined) {
         const data = await readerFetch(s, `/t/${s.id}/${s.highest}.json`), tail = data.post_stream;
         if (Number(data.id) !== s.id || !tail?.posts?.some(p => p.id === tail.stream?.at(-1))) throw new Error('末页暂不可读取');
@@ -926,7 +948,7 @@
         });
         await s.renderer.run(() => model.constructor.applyTransformations?.([model]));
         if (s !== state) return;
-        s.renderer.run(() => stream.updateFromJson(tail));
+        readerNativeContext(s, [tail.posts.find(post => post.id === tail.stream.at(-1))]);
       }
       if (s !== state) return;
       s.renderer.run(() => {
@@ -1348,6 +1370,7 @@
         }
         s.cursor = 0;
         await readerAdd(s, posts, true);
+        readerNativeContext(s, [s.raw.get(1)]);
         s.host.hidden = false; native.classList.add('ldt-native-hidden');
         syncComposer(s);
         s.checkTimer = setInterval(() => readerCheck(s), 60000);

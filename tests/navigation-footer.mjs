@@ -33,18 +33,25 @@ w.fetch=async path=>{calls.push(path);return{ok:true,json:async()=>{
 }}};
 const native=d.querySelector('.post-stream'),navigations=[];w.navigate=path=>navigations.push(path);
 let footerCalls=0,finishFooter;const footerReady=new Promise(resolve=>finishFooter=resolve);
-topic.postStream.loadedAllPosts=false;
+if(process.env.FIRST_NATIVE==='1')topic.postStream.posts=[post(1),...topic.postStream.posts];
+const originalPosts=[...topic.postStream.posts];
+Object.defineProperty(topic.postStream,'loadedAllPosts',{get:()=>topic.postStream.posts.some(p=>p.id===ids.at(-1))});
+Object.defineProperty(topic.postStream,'firstPostPresent',{get:()=>topic.postStream.posts.some(p=>p.post_number===1)});
 const nativeFooter=d.createElement('section');nativeFooter.id='topic-footer-buttons';nativeFooter.innerHTML='<button>分享</button><button>添加为书签</button><button>举报</button><button>标记为未读</button><button>回复</button>';
 nativeFooter.querySelector('button').onclick=()=>actions.push(['native-share']);
 topic.updateFromJson=data=>{topic.suggested_topics=data.suggested_topics;topic.related_topics=data.related_topics};
 let transformations=0;topic.constructor={applyTransformations:async models=>{assert.equal(models[0],topic);transformations++}};
-topic.postStream.updateFromJson=tail=>{assert.equal(tail.posts.at(-1).id,11000);topic.postStream.loadedAllPosts=true;native.after(nativeFooter);const more=d.createElement('section');more.className='more-topics__container';if(topic.suggested_topics?.length&&topic.related_topics?.length){more.innerHTML='<button>推荐</button><button>相关</button><a id="fixture-recommendation"></a>';const link=more.querySelector('a');const show=tab=>{const item=tab==='推荐'?topic.suggested_topics[0]:topic.related_topics[0];link.textContent=item.title;link.href='/t/topic/'+item.id};more.querySelectorAll('button').forEach(button=>button.onclick=()=>show(button.textContent));show('推荐')}nativeFooter.after(more)};
+const renderNative=()=>{let title=d.querySelector('#topic-title');if(topic.postStream.firstPostPresent&&!title){title=d.createElement('h1');title.id='topic-title';title.textContent='话题标题';native.before(title)}else if(!topic.postStream.firstPostPresent)title?.remove();if(!topic.postStream.loadedAllPosts)return;native.after(nativeFooter);const more=d.createElement('section');more.className='more-topics__container';if(topic.suggested_topics?.length&&topic.related_topics?.length){more.innerHTML='<button>推荐</button><button>相关</button><a id="fixture-recommendation"></a>';const link=more.querySelector('a');const show=tab=>{const item=tab==='推荐'?topic.suggested_topics[0]:topic.related_topics[0];link.textContent=item.title;link.href='/t/topic/'+item.id};more.querySelectorAll('button').forEach(button=>button.onclick=()=>show(button.textContent));show('推荐')}nativeFooter.after(more)};
+topic.postStream.updateFromJson=tail=>{topic.postStream.posts.splice(0,topic.postStream.posts.length,...tail.posts);renderNative()};
+topic.postStream.appendPost=p=>{if(!topic.postStream.posts.some(row=>row.id===p.id))topic.postStream.posts.push(p);renderNative()};
+topic.postStream.prependPost=p=>{if(!topic.postStream.posts.some(row=>row.id===p.id))topic.postStream.posts.unshift(p);renderNative()};
 const beforeFooterFetch=w.fetch;w.fetch=async path=>{if(path!=='/t/42/1000.json')return beforeFooterFetch(path);footerCalls++;await footerReady;return{ok:true,json:async()=>({id:42,suggested_topics:[{id:7,title:'推荐话题'}],related_topics:[{id:8,title:'相关话题'}],post_stream:{stream:ids,posts:[post(1000)]}})}};
 let footerNotified=0;controller.notifyPropertyChange=name=>{assert.equal(name,'loadedAllPosts');footerNotified++};
 
 installNativeTimelineFixture(w);
 w.eval(source.replaceAll('location.assign(', 'window.navigate(').replace(/\}\)\(\);\s*$/, 'window.navigationTest={locateRoot,readerJump,readerFetch,updateReader,getState:()=>state};})();'));
 await until(()=>d.querySelector('.ldt-owned > [data-post-number="219"]'),'阅读区初始化');
+assert.ok(topic.postStream.firstPostPresent,'深链接单独补取的首帖也应保留原生标题上下文');
 assert.equal(footerCalls,1,'阅读区准备完成即预备原生页尾，不等用户到底');
 await until(()=>d.querySelector('.ldt-progress-total')?.title,'顶层回复总数确定');
 const s=w.navigationTest.getState(),component=s.timelineComponent,rootIds=[...s.rootIds.keys()];
@@ -102,6 +109,10 @@ let idleMutations=0;await pause(30);const idleObserver=new w.MutationObserver(re
 finishFooter();
 s.more.getBoundingClientRect=()=>({top:600,bottom:640,height:40});w.dispatchEvent(new w.Event('scroll'));
 await until(()=>d.querySelector('#topic-footer-buttons'),'接近阅读区底部恢复原生操作和推荐');
+assert.ok(topic.postStream.firstPostPresent,'准备页尾时原生模型必须保留首帖，避免原站移除话题标题');
+assert.equal(d.querySelector('#topic-title')?.textContent,'话题标题','原生标题与自有首帖同时保留');
+assert.ok(originalPosts.every(p=>topic.postStream.posts.includes(p)),'页尾准备不能清空原生当前页的帖子及其引用');
+assert.equal(topic.postStream.posts.filter(p=>p.post_number===1).length,1,'首帖上下文不能重复加入');
 assert.equal(footerCalls,1);assert.equal(footerNotified,1,'原生加载完成后通知页尾重新计算');
 assert.equal(nativeFooter.dataset.ldtFooter,'pending','评论仍有后页时只准备数据，不抢先展示页尾');
 s.cursor=s.ids.length;s.rootRemaining.clear();s.loadingNext=true;w.navigationTest.updateReader(s);
@@ -127,4 +138,5 @@ await rejected;assert.equal(attempts,1,'切换引用后取消等待中的重试�
 assert.equal(d.querySelector('#topic-footer-buttons'),nativeFooter,'切回引用模式保留同一个原生页尾');
 assert.equal(nativeFooter.hasAttribute('data-ldt-footer'),false,'引用模式完全清除页尾出现控制');
 assert.equal(d.querySelector('.ldt-reading-progress'),null,'引用模式恢复原始定位条');
+assert.deepEqual(topic.postStream.posts,originalPosts,'退出楼中楼恢复原生连续分页窗口，不把预备末页插入引用模式');
 w.close();console.log('PASS: 顶层回复拖动预览/松手单条定位/缓存直达/旧请求隔离、原生页尾及推荐/相关数据同步与切换、引用模式保留');
