@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Linux DO 楼中楼阅读
 // @namespace    local.linuxdo.threaded-reading
-// @version      6.1.0
+// @version      6.1.1
 // @description  长帖按需加载、楼中楼递进连线、未读提示与引用切换，保留论坛原生操作。
 // @match        https://linux.do/*
 // @run-at       document-start
@@ -235,7 +235,7 @@
     .topic-map__stats:has(> .ldt-modebar) .topic-map__users-list { min-width: 0; overflow: hidden; }
     .post-stream > .ldt-modebar { justify-content: flex-end; margin: 0; padding: 4px 0; }
     [data-ldt-native-progress] { display: none !important; }
-    .ldt-native-timeline .title, .ldt-native-timeline .timeline-controls, .ldt-native-timeline .timeline-footer-controls { display: none; }
+    .ldt-native-timeline .timeline-controls, .ldt-native-timeline .timeline-footer-controls { display: none !important; }
     .ldt-progress-total { display: flex; gap: 2px 6px; margin: 8px 0; font-size: 11px; line-height: 1.5; color: var(--primary-medium, #777); font-variant-numeric: tabular-nums; cursor: default; user-select: none; }
     .ldt-progress-total > span { white-space: nowrap; }
     #topic-progress[data-ldt-mobile-progress] { display: flex; align-items: center; justify-content: center; box-sizing: border-box; height: auto; min-height: 40px; padding: 4px 10px; border: 1px solid var(--primary-low, #ddd); border-radius: 6px; background: var(--secondary, #fff); }
@@ -686,7 +686,11 @@
     if (native && total > 0) {
       if (s.progress && s.progress.previousElementSibling !== native) clearProgress(s);
       if (!s.progress) {
-        try { s.progress = progressPanel(s, native); native.dataset.ldtNativeProgress = ''; }
+        try {
+          s.progress = progressPanel(s, native); native.dataset.ldtNativeProgress = '';
+          const title = native.closest('.timeline-fullscreen') && native.parentElement.querySelector(':scope > .title');
+          if (title) title.dataset.ldtNativeProgress = '';
+        }
         catch (error) { if (!s.timelineError) console.warn('[Linux DO 楼中楼] 原生时间轴未接入', error); s.timelineError = true; }
       }
     }
@@ -715,7 +719,11 @@
       } else {
         const id = [...s.rootIds.keys()][index];
         let post = [...s.raw.values()].find(p => p.id === id);
-        if (post && readerCachedPage(s, post)) {
+        const node = post && s.nodes.get(post.post_number);
+        const desired = node ? window.scrollY + node.getBoundingClientRect().top - headerBottom() - 12 : Infinity;
+        const limit = Math.max(0, (document.scrollingElement || document.documentElement).scrollHeight - window.innerHeight);
+        const complete = s.cursor >= s.ids.length && !s.rootRemaining?.size;
+        if (post && readerCachedPage(s, post) && (desired <= limit + 1 || complete)) {
           s.tailOnly = false;
           if (!index) s.allowStart = true;
           readerJump(s, post.post_number);
@@ -732,7 +740,7 @@
         }
       }
       if (document.querySelector('.timeline-fullscreen')) {
-        try { (s.renderer || nativeRenderer()).owner.lookup('service:modal')?.close(); } catch {}
+        try { (s.renderer || nativeRenderer()).owner.lookup('service:app-events')?.trigger?.('topic:jump-to-post'); } catch {}
       }
     } catch {
       if (s === state && s.locating === token) { s.locateError = true; updateProgress(s); }
@@ -754,6 +762,7 @@
     const number = Number(new URL(url, location.href).pathname.split('/').filter(Boolean).at(-1));
     if (s.reader && s.raw.has(number) && readerCachedPage(s, s.raw.get(number))) {
       s.tailOnly = true; s.allowStart = !s.headCursor; readerEnd(s);
+      if (document.querySelector('.timeline-fullscreen')) { try { (s.renderer || nativeRenderer()).owner.lookup('service:app-events')?.trigger?.('topic:jump-to-post'); } catch {} }
     } else if (!s.reader && renderedPost(s, number)) {
       window.scrollTo({ top: Math.max(0, window.scrollY + s.stream.getBoundingClientRect().bottom - window.innerHeight), behavior: 'auto' });
     } else {
@@ -798,6 +807,9 @@
     const scrolled = Object.getOwnPropertyDescriptor(Timeline.prototype, 'postScrolled');
     // 直接使用原站组件的模板、轨道、拖动与预览；只替换筛选数据及定位出口。
     class FilteredTimeline extends Timeline {
+      get showTimelineControls() { return false; }
+      get displaySummary() { return false; }
+      get canCreatePost() { return false; }
       constructor(...args) { super(...args); s.timelineComponent = this; }
       get postScrolled() {
         const original = scrolled.get ? scrolled.get.call(this) : scrolled.value;
@@ -816,6 +828,8 @@
       model: nativeTimelineModel(s, r.controller.model), enteredIndex: 0,
       fullscreen: !!native.closest('.timeline-fullscreen'),
       setDocked() {}, setDockedBottom() {},
+      jumpTop(event) { return r.controller.send('jumpTop', event); },
+      jumpToPostPrompt() { return r.controller.send('jumpToPostPrompt'); },
       jumpToIndex(index) { s.dragRatio = undefined; return locateRoot(s, (index - .5) / progressTotal(s)); },
       jumpEnd() { s.dragRatio = undefined; return jumpToEnd(s, r.controller.model.lastPostUrl || undefined); },
     };

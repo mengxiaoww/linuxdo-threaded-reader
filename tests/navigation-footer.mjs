@@ -10,10 +10,12 @@ const ids=Array.from({length:1000},(_,i)=>10001+i);
 let rows=Array.from({length:20},(_,i)=>post(200+i));rows[0].boosts=[{cooked:'谢谢分享'}];rows[1].reply_to_post_number=200;rows[2].reply_to_post_number=201;rows[2].username='u1';
 const dom=new JSDOM('<header class="d-header"></header><aside class="timeline-container"><div class="timeline-scrollarea-wrapper"><a class="start-date" href="/t/topic/42/1">开始</a><div class="timeline-scrollarea"></div><a class="now-date" href="/t/topic/42/1000">末尾</a></div></aside><div class="post-stream"><div class="topic-post" data-post-number="200"><article class="boxed"><button id="original-like">原按钮</button></article></div><div class="post-stream--cloaked" data-post-number="800" style="height:200px"></div></div>',{url:'https://linux.do/t/topic/42/200',runScripts:'outside-only',pretendToBeVisual:true});
 const w=dom.window,d=w.document;let poll;const interval=w.setInterval.bind(w);w.setInterval=(fn,ms)=>{if(ms===60000)poll=fn;return interval(fn,ms)};const calls=[],actions=[],views=[];let saved={};let scroll=0,pages=0,newReply=false;
+Object.defineProperty(d.documentElement,'scrollHeight',{value:100000,configurable:true});
 Object.defineProperty(w,'scrollY',{get:()=>scroll});w.scrollTo=({top})=>scroll=Math.max(0,top);w.scrollBy=(arg,delta)=>scroll=Math.max(0,scroll+(typeof arg==='object'?arg.top:delta));
 const topic={id:42,posts_count:1000,details:{can_create_post:true},postStream:{posts:rows,stream:ids}};
 const controller={model:topic,send:(...args)=>actions.push(args)};
-const owner={lookup:name=>name==='controller:topic'?controller:store};
+const navigationEvents=[];
+const owner={lookup:name=>name==='controller:topic'?controller:name==='service:app-events'?{trigger:(...args)=>navigationEvents.push(args)}:store};
 const store={createRecord:(type,data)=>{const record={...data,set(k,v){this[k]=v}}; for(const key of Object.keys(data)) delete data[key]; return record}};
 const Base={extend:()=>({create:props=>({appendTo(container){const entry=props.renderGlimmer._registrations[0],args=entry.component.args,p=args.post;views.push(args);const root=d.createElement('div');root.className='topic-post';root.dataset.postNumber=p.post_number;root.innerHTML=`<article class="boxed"><div class="row"><div class="topic-avatar"><img class="avatar"></div><div class="topic-body"><div class="topic-meta-data"><span class="names"><span class="first">${p.name}</span></span></div><div class="cooked">${p.cooked}</div><div class="post-menu-area"><button class="like">赞</button><button class="reply">回复</button><div class="discourse-boosts__post-menu">${(p.boosts||[]).map(b=>`<button class="discourse-boosts__bubble">${b.cooked}</button>`).join('')}</div></div></div></div></article>`;root.querySelector('.reply').onclick=args.replyToPost;root.querySelector('.like').onclick=()=>actions.push(['native-like',p]);root.querySelector('.discourse-boosts__bubble')?.addEventListener('click',e=>e.currentTarget.setAttribute('aria-expanded','true'));entry.element.append(root);this.root=root},destroy(){this.root?.remove()}})})};
 w.require=name=>({
@@ -46,7 +48,8 @@ await until(()=>d.querySelector('.ldt-owned > [data-post-number="219"]'),'阅读
 assert.equal(footerCalls,1,'阅读区准备完成即预备原生页尾，不等用户到底');
 await until(()=>d.querySelector('.ldt-progress-total')?.title,'顶层回复总数确定');
 const s=w.navigationTest.getState(),component=s.timelineComponent,rootIds=[...s.rootIds.keys()];
-assert.ok(component,'挂载原站时间轴组件');assert.equal(d.querySelector('.ldt-progress-rail'),null,'不再创建自制滑块');
+assert.ok(component,'挂载原站时间轴组件');
+for(const e of s.progress.querySelectorAll('.timeline-controls,.timeline-footer-controls'))assert.equal(w.getComputedStyle(e).display,'none','论坛主题高优先级规则不能让重复控件重新出现');assert.equal(d.querySelector('.ldt-progress-rail'),null,'不再创建自制滑块');
 assert.equal(component.args.model.postStream.filteredPostsCount,997,'排除首帖和两条嵌套回复');
 const panel=s.progress;
 const pointer=type=>panel.querySelector('.timeline-scrollarea').dispatchEvent(new w.MouseEvent(type,{bubbles:true,cancelable:true,button:0}));
@@ -64,6 +67,8 @@ const cached=s.nodes.get(200);cached.getBoundingClientRect=()=>({top:200-scroll,
 const cachedIndex=rootIds.indexOf(10200),beforeCached=calls.length;
 await component.args.jumpToIndex(cachedIndex+1);
 assert.equal(scroll,188,'已加载目标直接滚到对应讨论');assert.equal(calls.length,beforeCached);assert.equal(navigations.length,1);
+const expanded=d.createElement('div');expanded.className='timeline-fullscreen';d.body.append(expanded);
+await component.args.jumpToIndex(cachedIndex+1);assert.equal(navigationEvents.at(-1)[0],'topic:jump-to-post','缓存定位也使用原生事件收起进度弹层');expanded.remove();
 // 主动定位不属于用户向上越界，不能被反向分页保护拉回。
 const firstPost=s.nodes.get(1);firstPost.getBoundingClientRect=()=>({top:20-scroll,bottom:120-scroll,height:100});
 s.allowStart=false;s.headCursor=199;s.lastScrollY=1000;scroll=1000;
@@ -71,6 +76,10 @@ w.navigationTest.readerJump(s,1);assert.equal(scroll,8,'主动定位首帖不能
 // 存在 DOM 的远处父评论只有上下文，不能当作完整已加载页直接滚动。
 s.raw.set(190,post(190));s.nodes.set(190,d.createElement('div'));
 await component.args.jumpToIndex(rootIds.indexOf(10190)+1);assert.equal(navigations.at(-1),'/t/topic/42/190','远处上下文定位回原生附近页');navigations.pop();s.nodes.delete(190);s.raw.delete(190);
+// 数据虽缓存，页面高度却不足以将目标放到阅读线：原生附近页才是可准确定位的窗口。
+Object.defineProperty(d.documentElement,'scrollHeight',{value:w.innerHeight+100,configurable:true});
+await component.args.jumpToIndex(cachedIndex+1);assert.equal(navigations.at(-1),'/t/topic/42/200','不能把被浏览器截断的滚动当作已准确到达');navigations.pop();
+Object.defineProperty(d.documentElement,'scrollHeight',{value:100000,configurable:true});
 let release;const gate=new Promise(resolve=>release=resolve),slowId=rootIds[700];
 w.fetch=async path=>path.endsWith(`post_ids[]=${slowId}`)?{ok:true,json:async()=>{await gate;return{post_stream:{posts:[post(slowId-10000)]}}}}:fetchBefore(path);
 const old=component.args.jumpToIndex(701);
