@@ -2,7 +2,7 @@
 
 把 LINUX DO 的回复按讨论关系串起来看，也可以切回按楼层顺序阅读的引用模式。
 
-**当前版本：v6.0.17** · [论坛分享与反馈](https://linux.do/t/topic/3021097) · [更新记录](CHANGELOG.md)
+**当前版本：v6.0.18** · [论坛分享与反馈](https://linux.do/t/topic/3021097) · [更新记录](CHANGELOG.md)
 
 ## 安装 / 更新
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Linux DO 楼中楼阅读
 // @namespace    local.linuxdo.threaded-reading
-// @version      6.0.17
+// @version      6.0.18
 // @description  长帖按需加载、楼中楼递进连线、未读提示与引用切换，保留论坛原生操作。
 // @match        https://linux.do/*
 // @run-at       document-start
@@ -846,13 +846,19 @@
 
   async function readerFooter(s) {
     const controller = s.renderer.controller, model = controller.model, stream = model?.postStream;
-    if (s !== state || Number(model?.id) !== s.id || !stream || typeof stream.updateFromJson !== 'function' || s.footerLoading || Date.now() < (s.footerRetryAt || 0) || s.footerHighest === s.highest && stream.loadedAllPosts) return;
+    if (s !== state || Number(model?.id) !== s.id || !stream || typeof stream.updateFromJson !== 'function' || typeof model.updateFromJson !== 'function' || s.footerLoading || Date.now() < (s.footerRetryAt || 0) || s.footerHighest === s.highest && stream.loadedAllPosts) return;
     s.footerLoading = true;
     try {
       // 提前补齐原生帖流的真实末页，让原生页尾在读到末尾之前准备好。
-      if (!stream.loadedAllPosts) {
+      if (!stream.loadedAllPosts || model.suggested_topics === undefined && model.related_topics === undefined) {
         const data = await readerFetch(s, `/t/${s.id}/${s.highest}.json`), tail = data.post_stream;
-        if (!tail?.posts?.some(p => p.id === tail.stream?.at(-1))) throw new Error('末页暂不可读取');
+        if (Number(data.id) !== s.id || !tail?.posts?.some(p => p.id === tail.stream?.at(-1))) throw new Error('末页暂不可读取');
+        s.renderer.run(() => {
+          data.categories?.forEach(category => model.site.updateCategory(category));
+          model.updateFromJson(data);
+        });
+        await s.renderer.run(() => model.constructor.applyTransformations?.([model]));
+        if (s !== state) return;
         s.renderer.run(() => stream.updateFromJson(tail));
       }
       if (s !== state) return;
