@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Linux DO 楼中楼阅读
 // @namespace    local.linuxdo.threaded-reading
-// @version      6.0.13
+// @version      6.0.14
 // @description  长帖按需加载、楼中楼递进连线、未读提示与引用切换，保留论坛原生操作。
 // @match        https://linux.do/*
 // @run-at       document-start
@@ -776,6 +776,7 @@
 
   function cleanup() {
     if (!state) return;
+    state.stopReplySync?.();
     state.abort.abort();
     if (state.reader) { state.autoReplies?.disconnect(); clearTimeout(state.autoTimer); clearTimeout(state.readTimer); clearTimeout(state.nextTimer); clearInterval(state.checkTimer); for (const view of state.views.values()) { try { state.renderer.run(() => view.destroy()); } catch {} } state.host.remove(); state.native.classList.remove("ldt-native-hidden"); }
     state.notice?.remove();
@@ -938,6 +939,50 @@
     return { controller, store, owner, Component, template, Post, setOwner, run, curry: load('ember-curry-component').default };
   }
 
+  function syncComposer(s) {
+    const owner = (s.renderer || nativeRenderer()).owner;
+    const composer = owner.lookup('service:composer');
+    const events = owner.lookup('service:app-events');
+    if (typeof composer?.save !== 'function' || !events?.on || !events?.off) return;
+    const original = composer.save;
+    function save(force, options = {}) {
+      if (s === state && mode === 'thread' && this.model?.action === 'reply' && Number(this.model.topic?.id) === s.id) {
+        return original.call(this, force, { ...options, jump: false });
+      }
+      return original.apply(this, arguments);
+    }
+    const created = async post => {
+      if (s !== state || Number(post?.topic_id) !== s.id || !Number.isSafeInteger(post.post_number) || !Number.isSafeInteger(post.id) || post.id <= 0) return;
+      if (!s.reader) {
+        s.seenNew?.add(post.post_number); s.updates?.delete(post.post_number);
+        const anchor = Number(nativeTopic()?.posts_count) > 20 ? readingAnchor(s) : null;
+        if (anchor) modeAnchor = { id: s.id, number: Number(anchor.dataset.postNumber), top: anchor.getBoundingClientRect().top };
+        schedule(); return;
+      }
+      s.read.add(post.post_number); s.pending.delete(post.post_number);
+      if (!s.ids.includes(post.id)) s.ids.push(post.id);
+      s.total = Math.max(s.total, s.ids.length);
+      try {
+        // 成功事件携带服务器确认的原生模型，不等待后台轮询，也不展示待审核的临时帖子。
+        const raw = post.cooked ? post : await readerFetch(s, `/posts/by_number/${s.id}/${post.post_number}`);
+        await readerAdd(s, [raw], true);
+        if (s !== state) return;
+        const node = s.nodes.get(post.post_number);
+        node?.classList.add('ldt-focus');
+        setTimeout(() => node?.classList.remove('ldt-focus'), 1600);
+        await readerRootCount(s);
+        if (s === state) updateReader(s);
+      } catch { if (s === state) readerCheck(s); }
+    };
+    composer.save = save;
+    events.on('post:created', created);
+    s.stopReplySync = () => {
+      events.off('post:created', created);
+      if (composer.save === save) composer.save = original;
+      s.stopReplySync = null;
+    };
+  }
+
   function readerNode(s, raw) {
     const node = element('div', 'topic-post ldt-native-post'); node.dataset.postNumber = raw.post_number;
     if (raw.username === s.owner) node.classList.add('topic-owner');
@@ -998,8 +1043,6 @@
   }
 
   async function readerAdd(s, posts, initial = false) {
-    const anchorNode = [...s.nodes.values()].filter(n => readerVisible(s, n)).sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)[0];
-    const anchor = anchorNode ? { node: anchorNode, top: anchorNode.getBoundingClientRect().top } : null;
     const added = [];
     for (const post of posts) if (Number.isSafeInteger(post.post_number) && Number.isSafeInteger(post.id) && (!post.topic_id || post.topic_id === s.id)) { s.raw.set(post.post_number, post); s.rootRemaining?.delete(post.id); }
     // 只补当前回复缺少的直接父评论，不抓取父子楼号之间的整段帖子。
@@ -1012,6 +1055,9 @@
         } catch (error) { if (s !== state || s.abort.signal.aborted) throw error; }
       }
     }
+    // 网络等待期间用户仍可能滚动，只在真正插入和重排前记录当前位置。
+    const anchorNode = [...s.nodes.values()].filter(n => readerVisible(s, n)).sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)[0];
+    const anchor = anchorNode ? { node: anchorNode, top: anchorNode.getBoundingClientRect().top } : null;
     merge(s, [...s.raw.values()]);
     for (const post of s.raw.values()) if (!s.nodes.has(post.post_number)) {
       const node = readerNode(s, post); s.nodes.set(post.post_number, node); s.stream.append(node); added.push(node);
@@ -1173,6 +1219,7 @@
         s.cursor = 0;
         await readerAdd(s, posts, true);
         s.host.hidden = false; native.classList.add('ldt-native-hidden');
+        syncComposer(s);
         s.checkTimer = setInterval(() => readerCheck(s), 60000);
         readerRootCount(s).then(() => { if (s === state) updateReader(s); });
         s.cursor = Math.max(0, ...[...s.raw.values()].map(p => s.ids.indexOf(p.id) + 1));
@@ -1208,6 +1255,8 @@
       document.head.append(state.style);
     }
     const s = state;
+    if (mode === 'thread' && !s.stopReplySync) { try { syncComposer(s); } catch { /* 原生组件未准备好时仍可正常回复。 */ } }
+    else if (mode !== 'thread') s.stopReplySync?.();
     if (mode === 'quote' && modeAnchor?.id === id) {
       const original = renderedPost(s, modeAnchor.number);
       if (original) { window.scrollBy(0, original.getBoundingClientRect().top - modeAnchor.top); modeAnchor = null; }
