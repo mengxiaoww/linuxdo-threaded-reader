@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Linux DO 楼中楼阅读
 // @namespace    local.linuxdo.threaded-reading
-// @version      6.0.16
+// @version      6.0.17
 // @description  长帖按需加载、楼中楼递进连线、未读提示与引用切换，保留论坛原生操作。
 // @match        https://linux.do/*
 // @run-at       document-start
@@ -51,10 +51,7 @@
     .ldt-native-post[data-ldt-depth]:not([data-ldt-depth="0"]) > .ldt-native-content > .topic-post > .boxed > .row { grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
     .ldt-native-post > .ldt-native-content > .topic-post > .boxed > .row:has(> .post-notice) { display: block; width: 100%; }
     .ldt-owned .post-notice { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
-    .ldt-owned .post-notice.new-user { display: flex; align-items: flex-start; gap: 8px; width: fit-content; margin: 0 0 12px; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--tertiary, #5965c7) 12%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--tertiary, #5965c7) 5%, var(--secondary, #fff)); color: var(--primary-high, #555); font-size: 12px; line-height: 1.6; }
-    .ldt-owned .post-notice.new-user > :first-child { flex: 0 0 auto; margin-top: 2px; }
-    .ldt-owned .post-notice.new-user .emoji { width: 16px; height: 16px; }
-    .ldt-owned .post-notice.new-user p { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+    .ldt-owned .post-notice.new-user { margin-top: 12px; }
     .ldt-owned .topic-body { float: none; width: 100% !important; min-width: 0; max-width: 100%; box-sizing: border-box; margin: 0 !important; }
     .ldt-owned .topic-avatar { float: none; min-width: 0; margin: 0 !important; align-self: start; padding: 12px 0 0 !important; }
     .ldt-owned .topic-meta-data { display: flex; align-items: flex-start; width: 100%; min-width: 0; gap: 8px; margin: 0 !important; box-sizing: border-box; }
