@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Linux DO 楼中楼阅读
 // @namespace    local.linuxdo.threaded-reading
-// @version      6.0.19
+// @version      6.0.20
 // @description  长帖按需加载、楼中楼递进连线、未读提示与引用切换，保留论坛原生操作。
 // @match        https://linux.do/*
 // @run-at       document-start
@@ -1435,7 +1435,7 @@
   document.addEventListener('visibilitychange', () => { scheduleProgress(); if (!document.hidden && state?.reader) readerCheck(state); });
   document.addEventListener('load', scheduleProgress, true);
   document.addEventListener('scroll', scheduleProgress, { passive: true, capture: true });
-  document.addEventListener('click', event => {
+  window.addEventListener('click', event => {
     if (!state || mode !== 'thread' || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     const date = event.target.closest?.('.timeline-container:not(.timeline-fullscreen) .start-date, .timeline-container:not(.timeline-fullscreen) .now-date');
     if (!date) return;

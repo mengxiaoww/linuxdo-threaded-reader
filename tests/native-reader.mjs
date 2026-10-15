@@ -29,7 +29,9 @@ w.fetch=async path=>{calls.push(path);return{ok:true,json:async()=>{
  throw Error(path);
 }}};
 const native=d.querySelector('.post-stream'),before=native.innerHTML,originalButton=d.querySelector('#original-like');
-w.eval(source);assert.equal(native.classList.contains('ldt-native-hidden'),false,'初始化期间先保留原页面，避免空白闪烁');await until(()=>d.querySelector('.ldt-owned > [data-post-number="219"]'),'完整原生帖子挂载');
+d.addEventListener('click',event=>{if(event.target.closest?.('.timeline-container .start-date, .timeline-container .now-date')){event.preventDefault();event.stopImmediatePropagation();scroll=999}},true);
+const navigations=[];w.navigate=path=>navigations.push(path);
+w.eval(source.replaceAll('location.assign(', 'window.navigate('));assert.equal(native.classList.contains('ldt-native-hidden'),false,'初始化期间先保留原页面，避免空白闪烁');await until(()=>d.querySelector('.ldt-owned > [data-post-number="219"]'),'完整原生帖子挂载');
 assert.equal(native.innerHTML,before,'原列表节点与占位不改写');
 assert.ok(!calls.includes('/t/42/200.json'),'历史返回已有原生帖子模型时直接复用，避免重新请求后才恢复样式');
 assert.equal(d.querySelector('.ldt-owned > [data-post-number="1"] .cooked').textContent,'正文 1','首帖保留');
@@ -73,5 +75,7 @@ assert.equal(d.querySelector('.ldt-progress-total').textContent,'已加载58 条
 assert.equal(d.querySelector('.ldt-progress-total > span:last-child').textContent,'58 条','数量整体排版，不拆散换行');
 const requestsBeforeTop=calls.length;scroll=1000;d.querySelector('.start-date').click();assert.equal(scroll,0,'已有首帖时点击顶部日期直接回到开头，不刷新页面');assert.equal(calls.length,requestsBeforeTop,'回开头不重新抓取帖子');assert.equal(d.querySelector('.ldt-owned > [data-post-number="200"]'),p200,'回开头保留评论节点');assert.equal(w.getComputedStyle(d.querySelector('.ldt-progress-total')).cursor,'default','统计文本使用箭头光标');
 const endDate=d.querySelector('.now-date');endDate.href='/t/topic/42/259';endDate.click();assert.equal(scroll,10040-w.innerHeight,'已加载末帖时底部日期滚到整个评论区的底端，不受末帖在楼中楼中的位置影响');assert.equal(calls.length,requestsBeforeTop,'定位已加载末帖不重新抓取帖子');assert.equal(d.querySelector('.ldt-owned > [data-post-number="200"]'),p200);
+endDate.href='/t/topic/42/1000';endDate.click();assert.equal(navigations.at(-1),endDate.href,'末帖未缓存时允许导航获取，原站点击监听不能抢先处理');
 d.querySelector('[data-mode="quote"]').click();assert.equal(d.querySelector('.ldt-independent'),null);assert.equal(d.querySelector('#original-like'),originalButton,'退出时恢复原流节点和事件');assert.equal(native.classList.contains('ldt-native-hidden'),false);
+scroll=0;d.querySelector('.start-date').click();assert.equal(scroll,999,'引用模式仍交给原站日期处理');
 w.close();console.log('PASS: 原生组件/话题上下文与回复事件、Boost 原生交互、首帖、完整帖流自动分页、楼中楼关系、已读计数、单滚动、退出恢复；无原楼及加载状态按钮');
