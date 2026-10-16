@@ -1,7 +1,8 @@
 // ==UserScript==
 // @name         Linux DO 楼中楼阅读
 // @namespace    local.linuxdo.threaded-reading
-// @version      6.1.3
+// @version      6.1.4
+// @icon         data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAABj1BMVEVHcEz/ogDv9P/////s///w8PDt/f/w8PD////s///w8PDw8PDw8PD/pAD////////s//8AAAD///8AAAAAAAD////p///r///v9v/v9f/v8/vw8O/v7+/v8/z03qvt/f/v9v/////7+/v/pQD///+zs7P+/v0UFBYLCw35+fn///8AAAD/////////////rgDt/v//qwDt/f/r////pgDs///v8/vv9v//pQD+/v79/f35+fn6+vrw8PAcHB7/sAP////w7+zs7OwdHR/v9v//sATz4br/qgDAwMAHBwn/rgD/sgoVFRft+/8iIiQeHiB0dHX/sgkhISP6+vr/sAXv8/sjIyX/sQX/sAL126H5y2UTExWqqqoXFxn/rQD7+/vw8O/7wkT5y2bv7+/x693/qAD126L/pwDw7urw8vfz4rwfHyEWFhj39/e/v8AJCQvv8/zq6urf398AAALCwsIAAACrq6uLi4wVFRj/sQZISEmzs7N2dnf30n//sQj5y2f03qz8vTQjIyRVVVdWVlc7UZSyAAAAPXRSTlMA9xIFBsDm/AYFn1H5+JABkPfm+fgQBgcBARz7+6b5EP4Hpvn++RL+/PxR+8Cmn/4Q/J9R+ab8wPsSEhwc+9z1RgAAAcJJREFUOMuF0WdXwjAUBuALCiLIHm5xgwqKewarOCl7qSji3uAW3KD+cG8LOI6tfT7knOS9yU1aAJZahkN3r60rHO6y9XbjRKaGH8oAjPbw49ND1uPJPjw9hu1GdrEEt6uSGX+P3nqWSJxZ9T3+TFLFLhe0wLhuY11vCflOXejUF7Lo1zd0nRgU909RAa3H53J+cfk82gA1WTijDDqpd0PI7/zFHzJ8UBPMPfCyuoAh5vzjzRDQMbEMVHfamItDTHunYpoYL2+vz5c5nF/fXuJrofWq4ya9xCF903HVigW7qXaKR3tqF0BBGmZ5NRAFyEkV4VVF5CAhFfwFFUQC/8RsCRABwgWCLQQvKfhMBamf4VWPHwq2jpvneDQfb+G/aNxrOlngdNK014gF5qPD/UVO+4dHZgATaA5E9DwHWnSgwbgGQLqjpKf/oJU7UmDiShB7t5XBldWf6epKULntFWOIyqHOGxe56ch3HqHdori3DiNWNYila5ttfS/Be6b3ffClr21zTSrGoAgLNRfPkbGhfjfqHxqLPF9ooLSfga0cw9Hca54pyL/mosMOKPQvqTXhMDgwOhKNjowODOLEVFtIPgHpQNRAEcfpZgAAAABJRU5ErkJggg==
 // @downloadURL  https://github.com/mengxiaoww/linuxdo-threaded-reader/raw/refs/heads/main/linuxdo-comments.user.js
 // @updateURL    https://github.com/mengxiaoww/linuxdo-threaded-reader/raw/refs/heads/main/linuxdo-comments.user.js
 // @description  长帖按需加载、楼中楼递进连线、未读提示与引用切换，保留论坛原生操作。
